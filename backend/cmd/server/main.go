@@ -24,19 +24,19 @@ func main() {
     log.Println("Connected to PostgreSQL")
 
     // Redis
-    redisClient, err := database.ConnectRedis(cfg)
-    if err != nil {
-        log.Println("Redis not running, continuing without it")
-    } else {
-        log.Println("Connected to Redis")
-    }
+    // redisClient, err := database.ConnectRedis(cfg)
+    // if err != nil {
+    //     log.Println("Redis not running, continuing without it")
+    // } else {
+    //     log.Println("Connected to Redis")
+    // }
 
     //MinIO
-    minioClient, err := database.ConnectMinIO(cfg)
-    if err != nil {
-        log.Fatal("Failed to connect to MinIO:", err)
-    }
-    log.Println("Connected to MinIO")
+    // minioClient, err := database.ConnectMinIO(cfg)
+    // if err != nil {
+    //     log.Fatal("Failed to connect to MinIO:", err)
+    // }
+    // log.Println("Connected to MinIO")
 
     // Gin
     r := gin.Default()
@@ -46,13 +46,14 @@ func main() {
         c.JSON(200, gin.H{
             "status": "OK",
             "database": db != nil,
-            "redis": redisClient != nil,
-            "storage": minioClient != nil,
+            // "redis": redisClient != nil,
+            // "storage": minioClient != nil,
         })
     })
 
     // register all routes (student, housing, admin)
-    routes.RegisterRoutes(r, db, redisClient, minioClient)
+    // routes.RegisterRoutes(r, db, redisClient, minioClient)
+    routes.RegisterRoutes(r, db)
 
     // start server
     log.Println("Server running on port", cfg.ServerPort)

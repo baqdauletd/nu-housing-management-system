@@ -4,15 +4,15 @@ import (
     "database/sql"
 
     "github.com/gin-gonic/gin"
-    "github.com/minio/minio-go/v7"
-    "github.com/redis/go-redis/v9"
+    // "github.com/minio/minio-go/v7"
+    // "github.com/redis/go-redis/v9"
 )
 
 func RegisterRoutes(
     r *gin.Engine,
     db *sql.DB,
-    redis *redis.Client,
-    minio *minio.Client,
+    // redis *redis.Client,
+    // minio *minio.Client,
 ) {
     // Auth routes
     // AuthRoutes(r, db)

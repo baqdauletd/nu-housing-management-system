@@ -31,11 +31,11 @@ func LoadConfig() (*Config, error) {
     cfg := &Config{
         ServerPort:     viper.GetString("PORT"),
         PostgresURL:    viper.GetString("POSTGRES_URL"),
-        RedisAddr:      viper.GetString("REDIS_ADDR"),
-        MinioEndpoint:  viper.GetString("MINIO_ENDPOINT"),
-        MinioAccessKey: viper.GetString("MINIO_ACCESS_KEY"),
-        MinioSecretKey: viper.GetString("MINIO_SECRET_KEY"),
-        MinioBucket:    viper.GetString("MINIO_BUCKET"),
+        // RedisAddr:      viper.GetString("REDIS_ADDR"),
+        // MinioEndpoint:  viper.GetString("MINIO_ENDPOINT"),
+        // MinioAccessKey: viper.GetString("MINIO_ACCESS_KEY"),
+        // MinioSecretKey: viper.GetString("MINIO_SECRET_KEY"),
+        // MinioBucket:    viper.GetString("MINIO_BUCKET"),
     }
 
     return cfg, nil
