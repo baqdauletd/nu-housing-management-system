@@ -1,0 +1,40 @@
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: baqdauletd
+      POSTGRES_PASSWORD: fathyu2027
+      POSTGRES_DB: housing
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U baqdauletd -d housing"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    # ports:
+    #   - "5450:5432"
+
+  # redis:
+  #   image: redis:alpine
+  #   ports:
+  #     - "6379:6379"
+
+  # minio:
+  #   image: minio/minio
+  #   ports:
+  #     - "9000:9000"
+  #   command: server /data
+
+  backend:
+    build: ./backend
+    ports:
+      - "8080:8080"
+    environment:
+      GIN_MODE: release
+    depends_on:
+      postgres:
+        condition: service_healthy
+      # - redis
+      # - minio
+    # volumes:
+    # - ./backend/.env:/app/.env

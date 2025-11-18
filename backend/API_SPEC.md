@@ -77,9 +77,7 @@ Submit a new housing application.
   "phone": "87021234567",
   "year": 2,
   "major": "Computer Science",
-  "gender": "male",
-  "room_preference": "double",
-  "additional_info": "No allergies"
+  "gender": "male"
 }
 ```
 
