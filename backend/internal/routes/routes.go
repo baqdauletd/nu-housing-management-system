@@ -8,6 +8,7 @@ import (
     "database/sql"
 
     "nu-housing-management-system/backend/internal/handlers"
+    customAuth "nu-housing-management-system/backend/internal/auth"
 )
 
 func RegisterRoutes(
@@ -24,14 +25,16 @@ func RegisterRoutes(
     }
 
     // --- STUDENT ROUTES ---
-    student := r.Group("/student")
-    {
-        student.GET("/me", handlers.GetProfile(db))
-        student.PUT("/update", handlers.UpdateProfile(db))
-    }
+    // student := r.Group("/student")
+    // student.Use(customAuth.AuthMiddleware(), customAuth.RoleMiddleware("student"))
+    // {
+    //     student.GET("/me", handlers.GetProfile(db))
+    //     student.PUT("/update", handlers.UpdateProfile(db))
+    // }
 
     // --- APPLICATION ROUTES ---
     application := r.Group("/applications")
+    application.Use(customAuth.AuthMiddleware(), customAuth.RoleMiddleware("student"))
     {
         application.POST("/submit", handlers.SubmitApplication(db)) //(db, minioClient)
         application.GET("/my", handlers.GetMyApplications(db))
@@ -40,20 +43,23 @@ func RegisterRoutes(
 
     // --- DOCUMENT ROUTES ---
     documents := r.Group("/documents")
+    documents.Use(customAuth.AuthMiddleware(), customAuth.RoleMiddleware("student"))
     {
         documents.POST("/upload", handlers.UploadDocument(db)) //(db, minioClient)
         documents.GET("/:doc_id", handlers.GetDocument(db))
     }
 
     // --- REVIEW ENGINE ROUTES ---
-    review := r.Group("/review")
-    {
-        review.POST("/auto/:application_id", handlers.TriggerAutoReview(db)) //(db, redis)
-        review.GET("/result/:application_id", handlers.GetAutoReviewResult(db)) //(db, redis)
-    }
+    // review := r.Group("/review")
+    // review.Use(customAuth.AuthMiddleware(), customAuth.RoleMiddleware("staff"))
+    // {
+    //     review.POST("/auto/:application_id", handlers.TriggerAutoReview(db)) //(db, redis)
+    //     review.GET("/result/:application_id", handlers.GetAutoReviewResult(db)) //(db, redis)
+    // }
 
     // --- HOUSING STAFF ROUTES ---
     housing := r.Group("/housing")
+    housing.Use(customAuth.AuthMiddleware(), customAuth.RoleMiddleware("staff"))
     {
         housing.GET("/applications", handlers.HousingListApplications(db))
         housing.GET("/applications/:id", handlers.HousingGetApplication(db))
@@ -63,6 +69,7 @@ func RegisterRoutes(
 
     // --- ADMIN ROUTES ---
     admin := r.Group("/admin")
+    admin.Use(customAuth.AuthMiddleware(), customAuth.RoleMiddleware("admin"))
     {
         admin.GET("/users", handlers.AdminListUsers(db))
         admin.POST("/create-user", handlers.AdminCreateUser(db))

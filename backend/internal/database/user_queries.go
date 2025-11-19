@@ -4,105 +4,102 @@ import (
 	"database/sql"
 	"errors"
 	"nu-housing-management-system/backend/internal/models"
-	"time"
 )
 
 ////////////////////////////////////////////////////////////
-// USER QUERIES
+// USER QUERIES (UPDATED FOR SCHEMA)
 ////////////////////////////////////////////////////////////
 
 // CreateUser inserts a new user (used for Register + AdminCreateUser)
-func CreateUser(db *sql.DB, u models.User) error {
+func CreateUser(db *sql.DB, u models.User) (int, error) {
 	query := `
-		INSERT INTO users (name, email, password_hash, role, created_at)
-		VALUES ($1, $2, $3, $4, NOW())
+		INSERT INTO users (nu_id, email, password_hash, role_id, phone, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
+		RETURNING id
 	`
-	_, err := db.Exec(query, u.Name, u.Email, u.PasswordHash, u.Role)
-	return err
+	var id int
+	err := db.QueryRow(query, u.NuID, u.Email, u.PasswordHash, u.RoleID, u.Phone).Scan(&id)
+	if err != nil {
+		return 0, err
+	}
+	return id, nil
 }
 
-// GetUserByEmail is important for Login
 func GetUserByEmail(db *sql.DB, email string) (models.User, error) {
 	var user models.User
 
 	query := `
-		SELECT id, name, email, password_hash, role, created_at
+		SELECT id, nu_id, email, password_hash, role_id, phone, created_at, updated_at
 		FROM users
 		WHERE email = $1
 	`
+
 	err := db.QueryRow(query, email).Scan(
 		&user.ID,
-		&user.Name,
+		&user.NuID,
 		&user.Email,
 		&user.PasswordHash,
-		&user.Role,
+		&user.RoleID,
+		&user.Phone,
 		&user.CreatedAt,
+		&user.UpdatedAt,
 	)
 
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return user, errors.New("user not found")
-		}
-		return user, err
+	if err == sql.ErrNoRows {
+		return user, errors.New("user not found")
 	}
-
-	return user, nil
+	return user, err
 }
 
-// GetUserByID is used for profile (GetProfile)
 func GetUserByID(db *sql.DB, id int) (models.User, error) {
 	var user models.User
 
 	query := `
-		SELECT id, name, email, role, created_at
+		SELECT id, nu_id, email, role_id, phone, created_at, updated_at
 		FROM users
 		WHERE id = $1
 	`
+
 	err := db.QueryRow(query, id).Scan(
 		&user.ID,
-		&user.Name,
+		&user.NuID,
 		&user.Email,
-		&user.Role,
+		&user.RoleID,
+		&user.Phone,
 		&user.CreatedAt,
+		&user.UpdatedAt,
 	)
 
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return user, errors.New("user not found")
-		}
-		return user, err
+	if err == sql.ErrNoRows {
+		return user, errors.New("user not found")
 	}
 
-	return user, nil
+	return user, err
 }
 
-// UpdateUser modifies allowed user fields
 func UpdateUser(db *sql.DB, u models.User) error {
 	query := `
 		UPDATE users
-		SET name = $1,
-			email = $2
+		SET email = $1,
+		    phone = $2,
+		    updated_at = NOW()
 		WHERE id = $3
 	`
-	_, err := db.Exec(query, u.Name, u.Email, u.ID)
+	_, err := db.Exec(query, u.Email, u.Phone, u.ID)
 	return err
 }
 
-// DeleteUser removes a user (AdminDeleteUser)
 func DeleteUser(db *sql.DB, userID int) error {
-	query := `DELETE FROM users WHERE id = $1`
-	_, err := db.Exec(query, userID)
+	_, err := db.Exec(`DELETE FROM users WHERE id = $1`, userID)
 	return err
 }
 
-// ListUsers returns all users (AdminListUsers)
 func ListUsers(db *sql.DB) ([]models.User, error) {
 	query := `
-		SELECT id, name, email, role, created_at
+		SELECT id, nu_id, email, role_id, phone, created_at, updated_at
 		FROM users
 		ORDER BY created_at DESC
 	`
-
 	rows, err := db.Query(query)
 	if err != nil {
 		return nil, err
@@ -110,62 +107,17 @@ func ListUsers(db *sql.DB) ([]models.User, error) {
 	defer rows.Close()
 
 	users := []models.User{}
-
 	for rows.Next() {
 		var u models.User
-
-		err := rows.Scan(
-			&u.ID,
-			&u.Name,
-			&u.Email,
-			&u.Role,
-			&u.CreatedAt,
-		)
-		if err != nil {
+		if err := rows.Scan(&u.ID, &u.NuID, &u.Email, &u.RoleID, &u.Phone, &u.CreatedAt, &u.UpdatedAt); err != nil {
 			return nil, err
 		}
-
 		users = append(users, u)
 	}
-
 	return users, nil
 }
 
-// ValidateUserCredentials is for Login
+// ValidateUserCredentials returns user with password_hash for login check
 func ValidateUserCredentials(db *sql.DB, email string) (models.User, error) {
-	var user models.User
-
-	query := `
-		SELECT id, name, email, password_hash, role, created_at
-		FROM users
-		WHERE email = $1
-	`
-
-	err := db.QueryRow(query, email).Scan(
-		&user.ID,
-		&user.Name,
-		&user.Email,
-		&user.PasswordHash,
-		&user.Role,
-		&user.CreatedAt,
-	)
-
-	if err != nil {
-		return user, err
-	}
-
-	return user, nil
-}
-
-////////////////////////////////////////////////////////////
-// OPTIONAL: FOR SEEDING / TEST PURPOSES
-////////////////////////////////////////////////////////////
-
-func SeedAdminUser(db *sql.DB) error {
-	_, err := db.Exec(`
-		INSERT INTO users (name, email, password_hash, role, created_at)
-		VALUES ('Admin', 'admin@example.com', 'adminpass', 'admin', $1)
-	`, time.Now())
-
-	return err
+	return GetUserByEmail(db, email)
 }

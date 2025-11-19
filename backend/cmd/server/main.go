@@ -9,6 +9,7 @@ import (
     "nu-housing-management-system/backend/internal/config"
     "nu-housing-management-system/backend/internal/database"
     "nu-housing-management-system/backend/internal/routes"
+    "nu-housing-management-system/backend/internal/auth"
 )
 
 func main() {
@@ -18,6 +19,8 @@ func main() {
         log.Fatal("Failed to load configuration:", err)
     }
 
+    auth.LoadJWTSecret()
+    
     // PostgreSQL
     db, err := database.ConnectPostgres(cfg)
     if err != nil {
