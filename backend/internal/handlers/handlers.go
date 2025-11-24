@@ -75,7 +75,7 @@ func Register(db *sql.DB) gin.HandlerFunc {
 		}
 
 		// return created user id
-		c.JSON(http.StatusCreated, gin.H{"id": id})
+		c.JSON(http.StatusCreated, gin.H{"userId": id})
 	}
 }
 
@@ -92,12 +92,12 @@ func Login(db *sql.DB) gin.HandlerFunc {
 
 		user, err := database.ValidateUserCredentials(db, body.Email)
 		if err != nil {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "no such email exists"})
 			return
 		}
 
 		if err := auth.CheckPassword(user.PasswordHash, body.Password); err != nil {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "wrong password"})
 			return
 		}
 
@@ -153,8 +153,8 @@ func SubmitApplication(db *sql.DB) gin.HandlerFunc {
 			Year           int    `json:"year" binding:"required"`
 			Major          string `json:"major" binding:"required"`
 			Gender         string `json:"gender" binding:"required"`
-			RoomPreference string `json:"room_preference"`
-			AdditionalInfo string `json:"additional_info"`
+			// RoomPreference string `json:"room_preference"`
+			// AdditionalInfo string `json:"additional_info"`
 		}
 		if err := c.ShouldBindJSON(&body); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid input", "details": err.Error()})
@@ -173,8 +173,8 @@ func SubmitApplication(db *sql.DB) gin.HandlerFunc {
 			Year:           body.Year,
 			Major:          body.Major,
 			Gender:         body.Gender,
-			RoomPreference: body.RoomPreference,
-			AdditionalInfo: body.AdditionalInfo,
+			// RoomPreference: body.RoomPreference,
+			// AdditionalInfo: body.AdditionalInfo,
 		}
 
 		id, err := database.SubmitApplication(db, app)

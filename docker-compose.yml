@@ -6,6 +6,9 @@ services:
       POSTGRES_PASSWORD: fathyu2027
       POSTGRES_DB: housing
 
+    volumes:
+    - ./infrastructure/db/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U baqdauletd -d housing"]
       interval: 5s

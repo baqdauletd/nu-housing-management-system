@@ -59,7 +59,7 @@ func RegisterRoutes(
 
     // --- HOUSING STAFF ROUTES ---
     housing := r.Group("/housing")
-    housing.Use(customAuth.AuthMiddleware(), customAuth.RoleMiddleware("staff"))
+    housing.Use(customAuth.AuthMiddleware(), customAuth.RoleMiddleware("housing"))
     {
         housing.GET("/applications", handlers.HousingListApplications(db))
         housing.GET("/applications/:id", handlers.HousingGetApplication(db))
