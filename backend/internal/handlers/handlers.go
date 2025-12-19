@@ -34,10 +34,14 @@ func Register(db *sql.DB) gin.HandlerFunc {
 			return
 		}
 
+		//---------CHANGE HERE---------//
+		// according to the frontend - make it bullet point choice, not string input
 		role := strings.ToLower(user.Role)
 		if role == "" {
 			role = "student"
 		}
+		//---------CHANGE HERE---------//
+		
 		if role != "student" && role != "housing" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid role: only 'student' or 'housing' allowed"})
 			return
@@ -49,7 +53,6 @@ func Register(db *sql.DB) gin.HandlerFunc {
 			return
 		}
 
-		// check uniqueness of email or nu_id
 		if _, err := database.GetUserByEmail(db, user.Email); err == nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "email already used"})
 			return
@@ -101,7 +104,6 @@ func Login(db *sql.DB) gin.HandlerFunc {
 			return
 		}
 
-		// fetch role name
 		roleName, _ := database.GetRoleNameByID(db, user.RoleID)
 
 		token, err := auth.GenerateToken(user.ID, roleName)
@@ -183,6 +185,10 @@ func SubmitApplication(db *sql.DB) gin.HandlerFunc {
 			return
 		}
 		c.JSON(http.StatusCreated, gin.H{"application_id": id})
+		//---------CHANGE HERE---------//
+		// handler should somehow check if a user is submitting the same application again, and prevent him from doing so
+			// maybe add some new row in the apps table to track application type and check if it is on "pending" status
+		//---------CHANGE HERE---------//
 	}
 }
 

@@ -28,11 +28,14 @@ func CreateUser(db *sql.DB, u models.User) (int, error) {
 func GetUserByEmail(db *sql.DB, email string) (models.User, error) {
 	var user models.User
 
+	//---------CHANGE HERE---------//
+	// Do I need to retrieve all user info here?
 	query := `
 		SELECT id, nu_id, email, password_hash, role_id, phone, created_at, updated_at
 		FROM users
 		WHERE email = $1
 	`
+	//---------CHANGE HERE---------//
 
 	err := db.QueryRow(query, email).Scan(
 		&user.ID,

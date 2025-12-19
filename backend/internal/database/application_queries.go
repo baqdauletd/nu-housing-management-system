@@ -19,10 +19,13 @@ func SubmitApplication(db *sql.DB, a models.Application) (int, error) {
 	`
 
 	var id int
+	//---------LEARN HERE---------//
+	// in what cases would this error out?
 	err := db.QueryRow(query, a.StudentID, a.Year, a.Major, a.Gender, a.RoomPreference, a.AdditionalInfo).Scan(&id)
 	if err != nil {
 		return 0, err
 	}
+	//---------LEARN HERE---------//
 	return id, nil
 }
 
@@ -95,6 +98,9 @@ func GetApplicationsByStudent(db *sql.DB, studentID int) ([]models.Application, 
 		}
 		apps = append(apps, a)
 	}
+	//---------LEARN HERE---------//
+	// in what cases would these error out?
+	//---------LEARN HERE---------//
 	return apps, nil
 }
 
@@ -108,6 +114,11 @@ func UpdateApplicationStatus(db *sql.DB, id int, status string, reviewerID int) 
 		WHERE id = $3
 	`
 	_, err := db.Exec(query, status, reviewerID, id)
+	
+	// ---------LEARN HERE---------//
+	// how does .EXEC() error out?
+	// ---------LEARN HERE---------//
+
 	return err
 }
 

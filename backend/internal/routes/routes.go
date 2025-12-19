@@ -32,6 +32,12 @@ func RegisterRoutes(
     //     student.PUT("/update", handlers.UpdateProfile(db))
     // }
 
+
+    //---------CHANGE HERE---------//
+    // maybe put /applications and /documents into student group?
+    //---------CHANGE HERE---------//
+
+
     // --- APPLICATION ROUTES ---
     application := r.Group("/applications")
     application.Use(customAuth.AuthMiddleware(), customAuth.RoleMiddleware("student"))

@@ -39,6 +39,10 @@ func AuthMiddleware() gin.HandlerFunc {
 		c.Set("role", claims.Role)
 
 		c.Next()
+
+		// ---------LEARN HERE---------//
+		// so context is like a cache?
+		// ---------LEARN HERE---------//
 	}
 }
 

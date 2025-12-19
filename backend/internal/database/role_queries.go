@@ -7,19 +7,31 @@ import (
 
 // GetRoleIDByName returns role id for a role name (e.g., "student", "housing", "admin")
 func GetRoleIDByName(db *sql.DB, name string) (int, error) {
+
+	//---------CHANGE HERE---------//
+	// Make structure constant with other codes - check user_queries.go - seperate query and scan
 	var id int
 	err := db.QueryRow(`SELECT id FROM roles WHERE name = $1`, name).Scan(&id)
 	if err == sql.ErrNoRows {
 		return 0, errors.New("role not found")
 	}
+	//---------CHANGE HERE---------//
+
+
 	return id, err
 }
 
 func GetRoleNameByID(db *sql.DB, id int) (string, error) {
+
+	//---------CHANGE HERE---------//
+	// Make structure constant with other codes - check user_queries.go - seperate query and scan
 	var name string
 	err := db.QueryRow(`SELECT name FROM roles WHERE id = $1`, id).Scan(&name)
 	if err == sql.ErrNoRows {
 		return "", errors.New("role not found")
 	}
+	//---------CHANGE HERE---------//
+
+	
 	return name, err
 }
