@@ -3,7 +3,7 @@ package routes
 import (
     "github.com/gin-gonic/gin"
     // "github.com/redis/go-redis/v9"
-    // "github.com/minio/minio-go/v7"
+    "github.com/minio/minio-go/v7"
     // "gorm.io/gorm"
     "database/sql"
 
@@ -15,7 +15,7 @@ func RegisterRoutes(
     r *gin.Engine,
     db *sql.DB,
     // redis *redis.Client,
-    // minioClient *minio.Client,
+    minioClient *minio.Client,
 ) {
     // --- AUTH ROUTES ---
     auth := r.Group("/auth")
@@ -51,7 +51,7 @@ func RegisterRoutes(
     documents := r.Group("/documents")
     documents.Use(customAuth.AuthMiddleware(), customAuth.RoleMiddleware("student"))
     {
-        documents.POST("/upload", handlers.UploadDocument(db)) //(db, minioClient)
+        documents.POST("/upload", handlers.UploadDocument(db, minioClient)) //(db, minioClient)
         documents.GET("/:doc_id", handlers.GetDocument(db))
     }
 

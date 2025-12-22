@@ -17,6 +17,7 @@ type Config struct {
     MinioAccessKey string
     MinioSecretKey string
     MinioBucket    string
+    MinioUseSSL    bool
 }
 
 func LoadConfig() (*Config, error) {
@@ -32,10 +33,11 @@ func LoadConfig() (*Config, error) {
         ServerPort:     viper.GetString("PORT"),
         PostgresURL:    viper.GetString("POSTGRES_URL"),
         // RedisAddr:      viper.GetString("REDIS_ADDR"),
-        // MinioEndpoint:  viper.GetString("MINIO_ENDPOINT"),
-        // MinioAccessKey: viper.GetString("MINIO_ACCESS_KEY"),
-        // MinioSecretKey: viper.GetString("MINIO_SECRET_KEY"),
-        // MinioBucket:    viper.GetString("MINIO_BUCKET"),
+        MinioEndpoint:  viper.GetString("MINIO_ENDPOINT"),
+        MinioAccessKey: viper.GetString("MINIO_ACCESS_KEY"),
+        MinioSecretKey: viper.GetString("MINIO_SECRET_KEY"),
+        MinioBucket:    viper.GetString("MINIO_BUCKET"),
+        MinioUseSSL:    viper.GetBool("MINIO_USE_SSL"),
     }
 
     return cfg, nil

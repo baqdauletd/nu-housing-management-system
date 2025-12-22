@@ -22,11 +22,19 @@ services:
   #   ports:
   #     - "6379:6379"
 
-  # minio:
-  #   image: minio/minio
-  #   ports:
-  #     - "9000:9000"
-  #   command: server /data
+  minio:
+    image: minio/minio
+    container_name: minio_nu_housing
+    restart: always
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin123
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
 
   backend:
     build: ./backend
@@ -37,7 +45,9 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      minio:
+        condition: service_started
       # - redis
-      # - minio
-    # volumes:
-    # - ./backend/.env:/app/.env
+
+volumes:
+  minio_data:

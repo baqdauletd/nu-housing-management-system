@@ -37,11 +37,11 @@ func main() {
     // }
 
     //MinIO
-    // minioClient, err := database.ConnectMinIO(cfg)
-    // if err != nil {
-    //     log.Fatal("Failed to connect to MinIO:", err)
-    // }
-    // log.Println("Connected to MinIO")
+    minioClient, err := database.ConnectMinIO(cfg)
+    if err != nil {
+        log.Fatal("Failed to connect to MinIO:", err)
+    }
+    log.Println("Connected to MinIO")
 
     // Gin
     router := gin.Default()
@@ -66,7 +66,7 @@ func main() {
 
     // register all routes (student, housing, admin)
     // routes.RegisterRoutes(r, db, redisClient, minioClient)
-    routes.RegisterRoutes(router, db)
+    routes.RegisterRoutes(router, db, minioClient)
 
     // start server
     log.Println("Server running on port", cfg.ServerPort)

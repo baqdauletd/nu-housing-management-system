@@ -2,11 +2,13 @@ package handlers
 
 import (
 	"database/sql"
+	"fmt"
 	"net/http"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
-	// "github.com/minio/minio-go/v7"
+	"github.com/minio/minio-go/v7"
+
 	// "github.com/redis/go-redis/v9"
 	"nu-housing-management-system/backend/internal/auth"
 	"nu-housing-management-system/backend/internal/database"
@@ -229,26 +231,56 @@ func GetApplicationStatus(db *sql.DB) gin.HandlerFunc {
 
 // UploadDocument: for now, expects JSON with application_id, type, file_url
 // Later to replace with multipart upload + MinIO.
-func UploadDocument(db *sql.DB) gin.HandlerFunc {
+func UploadDocument(db *sql.DB, minioClient *minio.Client) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		var body struct {
-			ApplicationID int    `json:"application_id" binding:"required"`
-			Type          string `json:"type" binding:"required"`
-			FileURL       string `json:"file_url" binding:"required"`
-		}
-		if err := c.ShouldBindJSON(&body); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid input"})
+
+		applicationID, err := strconv.Atoi(c.PostForm("application_id"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid application_id"})
 			return
 		}
 
+		docType := c.PostForm("type")
+		if docType == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "type is required"})
+			return
+		}
+
+		file, err := c.FormFile("file")
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "file is required"})
+			return
+		}
+
+		if !strings.HasSuffix(file.Filename, ".pdf") {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "only PDF files are allowed"})
+			return
+		}
+
+		fileObj, err := file.Open()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to open file"})
+			return
+		}
+		defer fileObj.Close()
+
+		objectName := fmt.Sprintf("applications/%d/%s.pdf", applicationID, docType)
+		_, err = minioClient.PutObject(c, "student-documents", objectName, fileObj, file.Size, minio.PutObjectOptions{ContentType: "application/pdf"})
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to upload to storage", "details": err.Error()})
+			return
+		}
+
+		fileURL := objectName
+
 		doc := models.Document{
-			ApplicationID: body.ApplicationID,
-			Type:          body.Type,
-			FileURL:       body.FileURL,
+			ApplicationID: applicationID,
+			Type:          docType,
+			FileURL:       fileURL,
 		}
 		id, err := database.InsertDocument(db, doc)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save document", "details": err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save document into db", "details": err.Error()})
 			return
 		}
 		c.JSON(http.StatusCreated, gin.H{"document_id": id})
