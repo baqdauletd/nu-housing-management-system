@@ -10,6 +10,21 @@
             "database": "housing",
             "username": "baqdauletd",
             "password": "fathyu2027"
+        },
+        {
+            "ssh": "Disabled",
+            "previewLimit": 50,
+            "server": "localhost",
+            "port": 5432,
+            "sshOptions": {
+                "port": 22
+            },
+            "driver": "PostgreSQL",
+            "name": "nu-housing-back",
+            "database": "housing_back",
+            "username": "postgres",
+            "password": "2317",
+            "connectionTimeout": 30
         }
     ]
 }

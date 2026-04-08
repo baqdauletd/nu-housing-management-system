@@ -114,7 +114,7 @@ func UpdateApplicationStatus(db *sql.DB, id int, status string, reviewerID int) 
 		WHERE id = $3
 	`
 	_, err := db.Exec(query, status, reviewerID, id)
-	
+
 	// ---------LEARN HERE---------//
 	// how does .EXEC() error out?
 	// ---------LEARN HERE---------//

@@ -1,7 +1,9 @@
 package handlers
 
 import (
+	"crypto/rand"
 	"database/sql"
+	"encoding/binary"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -25,14 +27,22 @@ import (
 func Register(db *sql.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var user struct {
-			NuID     string `json:"nu_id" binding:"required"`
-			Email    string `json:"email" binding:"required,email"`
-			Password string `json:"password" binding:"required,min=6"`
-			Phone    string `json:"phone"`
-			Role     string `json:"role"` // optional: "student" or "housing"
+			NuID            string `json:"nu_id"`
+			FirstName       string `json:"firstName"`
+			LastName        string `json:"lastName"`
+			Email           string `json:"email" binding:"required,email"`
+			Password        string `json:"password" binding:"required,min=6"`
+			ConfirmPassword string `json:"confirmPassword"`
+			Phone           string `json:"phone"`
+			Role            string `json:"role"` // optional: "student" or "housing"
 		}
 		if err := c.ShouldBindJSON(&user); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid input", "details": err.Error()})
+			return
+		}
+
+		if user.ConfirmPassword != "" && user.Password != user.ConfirmPassword {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "passwords do not match"})
 			return
 		}
 
@@ -43,10 +53,15 @@ func Register(db *sql.DB) gin.HandlerFunc {
 			role = "student"
 		}
 		//---------CHANGE HERE---------//
-		
+
 		if role != "student" && role != "housing" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid role: only 'student' or 'housing' allowed"})
 			return
+		}
+
+		nuID := strings.TrimSpace(user.NuID)
+		if nuID == "" {
+			nuID = generateFallbackNuID()
 		}
 
 		roleID, err := database.GetRoleIDByName(db, role)
@@ -67,7 +82,7 @@ func Register(db *sql.DB) gin.HandlerFunc {
 		}
 
 		u := models.User{
-			NuID:         user.NuID,
+			NuID:         nuID,
 			Email:        user.Email,
 			PasswordHash: hashed,
 			RoleID:       roleID,
@@ -82,6 +97,16 @@ func Register(db *sql.DB) gin.HandlerFunc {
 		// return created user id
 		c.JSON(http.StatusCreated, gin.H{"userId": id})
 	}
+}
+
+func generateFallbackNuID() string {
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "web0000000000000001"
+	}
+
+	// users.nu_id is VARCHAR(20); keep generated ids short and unique enough.
+	return fmt.Sprintf("web%017d", binary.BigEndian.Uint64(b[:])%100000000000000000)
 }
 
 func Login(db *sql.DB) gin.HandlerFunc {
@@ -117,16 +142,15 @@ func Login(db *sql.DB) gin.HandlerFunc {
 		c.JSON(http.StatusOK, gin.H{
 			"token": token,
 			"user": gin.H{
-				"id":     user.ID,
-				"nu_id":  user.NuID,
-				"email":  user.Email,
-				"role":   roleName,
-				"phone":  user.Phone,
+				"id":    user.ID,
+				"nu_id": user.NuID,
+				"email": user.Email,
+				"role":  roleName,
+				"phone": user.Phone,
 			},
 		})
 	}
 }
-
 
 //////////////////////////////////////////////////////////
 // STUDENT PROFILE HANDLERS
@@ -154,9 +178,9 @@ func Login(db *sql.DB) gin.HandlerFunc {
 func SubmitApplication(db *sql.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var body struct {
-			Year           int    `json:"year" binding:"required"`
-			Major          string `json:"major" binding:"required"`
-			Gender         string `json:"gender" binding:"required"`
+			Year   int    `json:"year" binding:"required"`
+			Major  string `json:"major" binding:"required"`
+			Gender string `json:"gender" binding:"required"`
 			// RoomPreference string `json:"room_preference"`
 			// AdditionalInfo string `json:"additional_info"`
 		}
@@ -173,10 +197,10 @@ func SubmitApplication(db *sql.DB) gin.HandlerFunc {
 		studentID := uid.(int)
 
 		app := models.Application{
-			StudentID:      studentID,
-			Year:           body.Year,
-			Major:          body.Major,
-			Gender:         body.Gender,
+			StudentID: studentID,
+			Year:      body.Year,
+			Major:     body.Major,
+			Gender:    body.Gender,
 			// RoomPreference: body.RoomPreference,
 			// AdditionalInfo: body.AdditionalInfo,
 		}
@@ -189,7 +213,7 @@ func SubmitApplication(db *sql.DB) gin.HandlerFunc {
 		c.JSON(http.StatusCreated, gin.H{"application_id": id})
 		//---------CHANGE HERE---------//
 		// handler should somehow check if a user is submitting the same application again, and prevent him from doing so
-			// maybe add some new row in the apps table to track application type and check if it is on "pending" status
+		// maybe add some new row in the apps table to track application type and check if it is on "pending" status
 		//---------CHANGE HERE---------//
 	}
 }
@@ -399,7 +423,6 @@ func HousingReject(db *sql.DB) gin.HandlerFunc {
 //////////////////////////////////////////////////////////
 // ADMIN HANDLERS
 //////////////////////////////////////////////////////////
-
 
 func AdminListUsers(db *sql.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
