@@ -3,6 +3,7 @@ package database
 import (
 	"database/sql"
 	"errors"
+	"log"
 	"nu-housing-management-system/backend/internal/models"
 )
 
@@ -10,7 +11,6 @@ import (
 // USER QUERIES (UPDATED FOR SCHEMA)
 ////////////////////////////////////////////////////////////
 
-// CreateUser inserts a new user (used for Register + AdminCreateUser)
 func CreateUser(db *sql.DB, u models.User) (int, error) {
 	query := `
 		INSERT INTO users (nu_id, email, password_hash, role_id, phone, created_at, updated_at)
@@ -27,16 +27,12 @@ func CreateUser(db *sql.DB, u models.User) (int, error) {
 
 func GetUserByEmail(db *sql.DB, email string) (models.User, error) {
 	var user models.User
-
-	//---------CHANGE HERE---------//
-	// Do I need to retrieve all user info here?
 	query := `
 		SELECT id, nu_id, email, password_hash, role_id, phone, created_at, updated_at
 		FROM users
 		WHERE email = $1
 	`
-	//---------CHANGE HERE---------//
-
+	log.Printf("DEBUG: querying for email: %q", email)
 	err := db.QueryRow(query, email).Scan(
 		&user.ID,
 		&user.NuID,
@@ -47,22 +43,23 @@ func GetUserByEmail(db *sql.DB, email string) (models.User, error) {
 		&user.CreatedAt,
 		&user.UpdatedAt,
 	)
-
 	if err == sql.ErrNoRows {
+		log.Printf("DEBUG: no rows found for email: %q", email)
 		return user, errors.New("user not found")
+	}
+	if err != nil {
+		log.Printf("DEBUG: query error: %v", err)
 	}
 	return user, err
 }
 
 func GetUserByID(db *sql.DB, id int) (models.User, error) {
 	var user models.User
-
 	query := `
 		SELECT id, nu_id, email, role_id, phone, created_at, updated_at
 		FROM users
 		WHERE id = $1
 	`
-
 	err := db.QueryRow(query, id).Scan(
 		&user.ID,
 		&user.NuID,
@@ -72,11 +69,9 @@ func GetUserByID(db *sql.DB, id int) (models.User, error) {
 		&user.CreatedAt,
 		&user.UpdatedAt,
 	)
-
 	if err == sql.ErrNoRows {
 		return user, errors.New("user not found")
 	}
-
 	return user, err
 }
 
@@ -108,7 +103,6 @@ func ListUsers(db *sql.DB) ([]models.User, error) {
 		return nil, err
 	}
 	defer rows.Close()
-
 	users := []models.User{}
 	for rows.Next() {
 		var u models.User
@@ -120,7 +114,6 @@ func ListUsers(db *sql.DB) ([]models.User, error) {
 	return users, nil
 }
 
-// ValidateUserCredentials returns user with password_hash for login check
 func ValidateUserCredentials(db *sql.DB, email string) (models.User, error) {
 	return GetUserByEmail(db, email)
 }

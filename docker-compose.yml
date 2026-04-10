@@ -1,14 +1,13 @@
 services:
   postgres:
     image: postgres:15
+    container_name: postgres_nu_housing
     environment:
       POSTGRES_USER: baqdauletd
       POSTGRES_PASSWORD: fathyu2027
       POSTGRES_DB: housing
-
     volumes:
     - ./infrastructure/db/schema.sql:/docker-entrypoint-initdb.d/schema.sql
-
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U baqdauletd -d housing"]
       interval: 5s
@@ -16,12 +15,10 @@ services:
       retries: 5
     # ports:
     #   - "5450:5432"
-
   # redis:
   #   image: redis:alpine
   #   ports:
   #     - "6379:6379"
-
   minio:
     image: minio/minio
     container_name: minio_nu_housing
@@ -35,7 +32,6 @@ services:
     command: server /data --console-address ":9001"
     volumes:
       - minio_data:/data
-
   backend:
     build: ./backend
     ports:
@@ -48,6 +44,5 @@ services:
       minio:
         condition: service_started
       # - redis
-
 volumes:
   minio_data:

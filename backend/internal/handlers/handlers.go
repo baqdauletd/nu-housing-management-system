@@ -86,7 +86,7 @@ func Register(db *sql.DB) gin.HandlerFunc {
 			Email:        user.Email,
 			PasswordHash: hashed,
 			RoleID:       roleID,
-			Phone:        user.Phone,
+			Phone:        &user.Phone,
 		}
 		id, err := database.CreateUser(db, u)
 		if err != nil {
@@ -181,8 +181,8 @@ func SubmitApplication(db *sql.DB) gin.HandlerFunc {
 			Year   int    `json:"year" binding:"required"`
 			Major  string `json:"major" binding:"required"`
 			Gender string `json:"gender" binding:"required"`
-			// RoomPreference string `json:"room_preference"`
-			// AdditionalInfo string `json:"additional_info"`
+			RoomPreference string `json:"room_preference"`
+			AdditionalInfo string `json:"additional_info"`
 		}
 		if err := c.ShouldBindJSON(&body); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid input", "details": err.Error()})
@@ -201,8 +201,8 @@ func SubmitApplication(db *sql.DB) gin.HandlerFunc {
 			Year:      body.Year,
 			Major:     body.Major,
 			Gender:    body.Gender,
-			// RoomPreference: body.RoomPreference,
-			// AdditionalInfo: body.AdditionalInfo,
+			RoomPreference: body.RoomPreference,
+			AdditionalInfo: body.AdditionalInfo,
 		}
 
 		id, err := database.SubmitApplication(db, app)
@@ -463,7 +463,7 @@ func AdminCreateUser(db *sql.DB) gin.HandlerFunc {
 			Email:        body.Email,
 			PasswordHash: hash,
 			RoleID:       roleID,
-			Phone:        body.Phone,
+			Phone:        &body.Phone,
 		}
 		id, err := database.CreateUser(db, u)
 		if err != nil {
@@ -505,5 +505,47 @@ func AdminStats(db *sql.DB) gin.HandlerFunc {
 			return
 		}
 		c.JSON(http.StatusOK, stats)
+	}
+}
+
+//////////////////////////////////////////////////////////
+// DOCUMENT HANDLER
+//////////////////////////////////////////////////////////
+
+func GetDocumentsByApplication(db *sql.DB, minioClient *minio.Client) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		idStr := c.Param("app_id")
+		appID, _ := strconv.Atoi(idStr)
+
+		docs, err := database.GetDocumentsByApplication(db, appID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch documents"})
+			return
+		}
+
+		type DocResponse struct {
+			ID          int    `json:"id"`
+			Type        string `json:"type"`
+			DownloadURL string `json:"download_url"`
+		}
+
+		var result []DocResponse
+		for _, doc := range docs {
+			url, err := minioClient.PresignedGetObject(c, "student-documents", doc.FileURL, 24*60*60*1000000000, nil)
+			if err != nil {
+				continue
+			}
+			result = append(result, DocResponse{
+				ID:          doc.ID,
+				Type:        doc.Type,
+				DownloadURL: url.String(),
+			})
+		}
+
+		if result == nil {
+			result = []DocResponse{}
+		}
+
+		c.JSON(http.StatusOK, result)
 	}
 }
