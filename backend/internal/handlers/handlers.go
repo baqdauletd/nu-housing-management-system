@@ -7,11 +7,11 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/minio/minio-go/v7"
 
-	// "github.com/redis/go-redis/v9"
 	"nu-housing-management-system/backend/internal/auth"
 	"nu-housing-management-system/backend/internal/database"
 	"nu-housing-management-system/backend/internal/models"
@@ -22,8 +22,6 @@ import (
 // AUTH HANDLERS
 //////////////////////////////////////////////////////////
 
-// Register allows students and housing staff to create accounts.
-// Admin should NOT be allowed to self-register.
 func Register(db *sql.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var user struct {
@@ -34,7 +32,7 @@ func Register(db *sql.DB) gin.HandlerFunc {
 			Password        string `json:"password" binding:"required,min=6"`
 			ConfirmPassword string `json:"confirmPassword"`
 			Phone           string `json:"phone"`
-			Role            string `json:"role"` // optional: "student" or "housing"
+			Role            string `json:"role"`
 		}
 		if err := c.ShouldBindJSON(&user); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid input", "details": err.Error()})
@@ -46,13 +44,10 @@ func Register(db *sql.DB) gin.HandlerFunc {
 			return
 		}
 
-		//---------CHANGE HERE---------//
-		// according to the frontend - make it bullet point choice, not string input
 		role := strings.ToLower(user.Role)
 		if role == "" {
 			role = "student"
 		}
-		//---------CHANGE HERE---------//
 
 		if role != "student" && role != "housing" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid role: only 'student' or 'housing' allowed"})
@@ -94,7 +89,9 @@ func Register(db *sql.DB) gin.HandlerFunc {
 			return
 		}
 
-		// return created user id
+		// log registration
+		db.Exec(`INSERT INTO audit_logs (actor_id, action, entity, entity_id) VALUES ($1, 'register', 'user', $1)`, id)
+
 		c.JSON(http.StatusCreated, gin.H{"userId": id})
 	}
 }
@@ -104,8 +101,6 @@ func generateFallbackNuID() string {
 	if _, err := rand.Read(b[:]); err != nil {
 		return "web0000000000000001"
 	}
-
-	// users.nu_id is VARCHAR(20); keep generated ids short and unique enough.
 	return fmt.Sprintf("web%017d", binary.BigEndian.Uint64(b[:])%100000000000000000)
 }
 
@@ -122,11 +117,15 @@ func Login(db *sql.DB) gin.HandlerFunc {
 
 		user, err := database.ValidateUserCredentials(db, body.Email)
 		if err != nil {
+			// log failed login — no actor_id since user not found
+			db.Exec(`INSERT INTO audit_logs (action, entity) VALUES ('login_failed', 'user')`)
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "no such email exists"})
 			return
 		}
 
 		if err := auth.CheckPassword(user.PasswordHash, body.Password); err != nil {
+			// log failed login — we know the user but wrong password
+			db.Exec(`INSERT INTO audit_logs (actor_id, action, entity, entity_id) VALUES ($1, 'login_failed', 'user', $1)`, user.ID)
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "wrong password"})
 			return
 		}
@@ -138,6 +137,9 @@ func Login(db *sql.DB) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "token generation failed"})
 			return
 		}
+
+		// log successful login
+		db.Exec(`INSERT INTO audit_logs (actor_id, action, entity, entity_id) VALUES ($1, 'login', 'user', $1)`, user.ID)
 
 		c.JSON(http.StatusOK, gin.H{
 			"token": token,
@@ -153,34 +155,15 @@ func Login(db *sql.DB) gin.HandlerFunc {
 }
 
 //////////////////////////////////////////////////////////
-// STUDENT PROFILE HANDLERS
-//////////////////////////////////////////////////////////
-
-// func GetProfile(db *sql.DB) gin.HandlerFunc {
-// 	return func(c *gin.Context) {
-// 		// TODO: Fetch student data using student_id from JWT
-// 		c.JSON(http.StatusOK, gin.H{"message": "get profile"})
-// 	}
-// }
-
-// func UpdateProfile(db *sql.DB) gin.HandlerFunc {
-// 	return func(c *gin.Context) {
-// 		// TODO: Update student fields in DB
-// 		c.JSON(http.StatusOK, gin.H{"message": "update profile"})
-// 	}
-// }
-
-//////////////////////////////////////////////////////////
 // APPLICATION HANDLERS
 //////////////////////////////////////////////////////////
 
-// SubmitApplication expects authenticated student (user_id in context)
 func SubmitApplication(db *sql.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var body struct {
-			Year   int    `json:"year" binding:"required"`
-			Major  string `json:"major" binding:"required"`
-			Gender string `json:"gender" binding:"required"`
+			Year           int    `json:"year" binding:"required"`
+			Major          string `json:"major" binding:"required"`
+			Gender         string `json:"gender" binding:"required"`
 			RoomPreference string `json:"room_preference"`
 			AdditionalInfo string `json:"additional_info"`
 		}
@@ -197,10 +180,10 @@ func SubmitApplication(db *sql.DB) gin.HandlerFunc {
 		studentID := uid.(int)
 
 		app := models.Application{
-			StudentID: studentID,
-			Year:      body.Year,
-			Major:     body.Major,
-			Gender:    body.Gender,
+			StudentID:      studentID,
+			Year:           body.Year,
+			Major:          body.Major,
+			Gender:         body.Gender,
 			RoomPreference: body.RoomPreference,
 			AdditionalInfo: body.AdditionalInfo,
 		}
@@ -211,10 +194,6 @@ func SubmitApplication(db *sql.DB) gin.HandlerFunc {
 			return
 		}
 		c.JSON(http.StatusCreated, gin.H{"application_id": id})
-		//---------CHANGE HERE---------//
-		// handler should somehow check if a user is submitting the same application again, and prevent him from doing so
-		// maybe add some new row in the apps table to track application type and check if it is on "pending" status
-		//---------CHANGE HERE---------//
 	}
 }
 
@@ -253,11 +232,8 @@ func GetApplicationStatus(db *sql.DB) gin.HandlerFunc {
 // DOCUMENT HANDLERS
 //////////////////////////////////////////////////////////
 
-// UploadDocument: for now, expects JSON with application_id, type, file_url
-// Later to replace with multipart upload + MinIO.
 func UploadDocument(db *sql.DB, minioClient *minio.Client) gin.HandlerFunc {
 	return func(c *gin.Context) {
-
 		applicationID, err := strconv.Atoi(c.PostForm("application_id"))
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid application_id"})
@@ -295,12 +271,10 @@ func UploadDocument(db *sql.DB, minioClient *minio.Client) gin.HandlerFunc {
 			return
 		}
 
-		fileURL := objectName
-
 		doc := models.Document{
 			ApplicationID: applicationID,
 			Type:          docType,
-			FileURL:       fileURL,
+			FileURL:       objectName,
 		}
 		id, err := database.InsertDocument(db, doc)
 		if err != nil {
@@ -325,32 +299,9 @@ func GetDocument(db *sql.DB) gin.HandlerFunc {
 }
 
 //////////////////////////////////////////////////////////
-// REVIEW ENGINE HANDLERS
-//////////////////////////////////////////////////////////
-
-// func TriggerAutoReview(db *sql.DB) gin.HandlerFunc { //(db *sql.DB, redis *redis.Client)
-// 	return func(c *gin.Context) {
-// 		// TODO:
-// 		// 1. Push job to Redis queue
-// 		// 2. Worker processes automatic review
-// 		c.JSON(http.StatusOK, gin.H{"message": "auto review triggered"})
-// 	}
-// }
-
-// func GetAutoReviewResult(db *sql.DB) gin.HandlerFunc { //(db *sql.DB, redis *redis.Client)
-// 	return func(c *gin.Context) {
-// 		// TODO:
-// 		// 1. Check Redis for result
-// 		// 2. Return status (accepted, rejected, needs manual review)
-// 		c.JSON(http.StatusOK, gin.H{"message": "auto review result"})
-// 	}
-// }
-
-//////////////////////////////////////////////////////////
 // HOUSING STAFF HANDLERS
 //////////////////////////////////////////////////////////
 
-// List all applications (housing staff)
 func HousingListApplications(db *sql.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		apps, err := database.HousingListApplications(db)
@@ -442,7 +393,7 @@ func AdminCreateUser(db *sql.DB) gin.HandlerFunc {
 			Email    string `json:"email" binding:"required,email"`
 			Password string `json:"password" binding:"required,min=6"`
 			Phone    string `json:"phone"`
-			Role     string `json:"role" binding:"required"` // allow admin if you want; here admin will be allowed since this endpoint is admin-only
+			Role     string `json:"role" binding:"required"`
 		}
 		if err := c.ShouldBindJSON(&body); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid input"})
@@ -531,10 +482,17 @@ func GetDocumentsByApplication(db *sql.DB, minioClient *minio.Client) gin.Handle
 
 		var result []DocResponse
 		for _, doc := range docs {
-			url, err := minioClient.PresignedGetObject(c, "student-documents", doc.FileURL, 24*60*60*1000000000, nil)
+			url, err := minioClient.PresignedGetObject(
+				c,
+				"student-documents",
+				doc.FileURL,
+				24*time.Hour,
+				nil,
+			)
 			if err != nil {
 				continue
 			}
+
 			result = append(result, DocResponse{
 				ID:          doc.ID,
 				Type:        doc.Type,

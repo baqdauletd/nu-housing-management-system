@@ -7,10 +7,6 @@ import (
 	"nu-housing-management-system/backend/internal/models"
 )
 
-////////////////////////////////////////////////////////////
-// USER QUERIES (UPDATED FOR SCHEMA)
-////////////////////////////////////////////////////////////
-
 func CreateUser(db *sql.DB, u models.User) (int, error) {
 	query := `
 		INSERT INTO users (nu_id, email, password_hash, role_id, phone, created_at, updated_at)
@@ -22,6 +18,7 @@ func CreateUser(db *sql.DB, u models.User) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	db.Exec(`INSERT INTO audit_logs (action, entity, entity_id) VALUES ('create', 'user', $1)`, id)
 	return id, nil
 }
 
@@ -89,7 +86,11 @@ func UpdateUser(db *sql.DB, u models.User) error {
 
 func DeleteUser(db *sql.DB, userID int) error {
 	_, err := db.Exec(`DELETE FROM users WHERE id = $1`, userID)
-	return err
+	if err != nil {
+		return err
+	}
+	db.Exec(`INSERT INTO audit_logs (action, entity, entity_id) VALUES ('delete', 'user', $1)`, userID)
+	return nil
 }
 
 func ListUsers(db *sql.DB) ([]models.User, error) {

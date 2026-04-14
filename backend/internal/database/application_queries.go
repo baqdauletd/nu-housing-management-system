@@ -6,26 +6,19 @@ import (
 	"nu-housing-management-system/backend/internal/models"
 )
 
-////////////////////////////////////////////////////////////
-// APPLICATION QUERIES (UPDATED)
-////////////////////////////////////////////////////////////
-
 func SubmitApplication(db *sql.DB, a models.Application) (int, error) {
 	query := `
-		INSERT INTO applications 
+		INSERT INTO applications
 		(student_id, year, major, gender, room_preference, additional_info, status, submitted_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, 'pending', NOW(), NOW())
 		RETURNING id
 	`
-
 	var id int
-	//---------LEARN HERE---------//
-	// in what cases would this error out?
 	err := db.QueryRow(query, a.StudentID, a.Year, a.Major, a.Gender, a.RoomPreference, a.AdditionalInfo).Scan(&id)
 	if err != nil {
 		return 0, err
 	}
-	//---------LEARN HERE---------//
+	db.Exec(`INSERT INTO audit_logs (actor_id, action, entity, entity_id) VALUES ($1, 'submit', 'application', $2)`, a.StudentID, id)
 	return id, nil
 }
 
@@ -98,9 +91,6 @@ func GetApplicationsByStudent(db *sql.DB, studentID int) ([]models.Application, 
 		}
 		apps = append(apps, a)
 	}
-	//---------LEARN HERE---------//
-	// in what cases would these error out?
-	//---------LEARN HERE---------//
 	return apps, nil
 }
 
@@ -114,11 +104,6 @@ func UpdateApplicationStatus(db *sql.DB, id int, status string, reviewerID int) 
 		WHERE id = $3
 	`
 	_, err := db.Exec(query, status, reviewerID, id)
-
-	// ---------LEARN HERE---------//
-	// how does .EXEC() error out?
-	// ---------LEARN HERE---------//
-
 	return err
 }
 
