@@ -5,17 +5,6 @@
             "previewLimit": 50,
             "server": "localhost",
             "port": 5432,
-            "driver": "PostgreSQL",
-            "name": "nu-housing",
-            "database": "housing",
-            "username": "baqdauletd",
-            "password": "fathyu2027"
-        },
-        {
-            "ssh": "Disabled",
-            "previewLimit": 50,
-            "server": "localhost",
-            "port": 5432,
             "sshOptions": {
                 "port": 22
             },
@@ -25,6 +14,18 @@
             "username": "postgres",
             "password": "2317",
             "connectionTimeout": 30
+        },
+        {
+            "ssh": "Disabled",
+            "previewLimit": 50,
+            "server": "aws-1-ap-northeast-1.pooler.supabase.com",
+            "port": 5432,
+            "driver": "PostgreSQL",
+            "name": "housing_nu",
+            "database": "nu_housing",
+            "password": "housing_back2027",
+            "connectionTimeout": 30,
+            "username": "postgres.vjmegcuikktzhhcuqulr"
         }
     ]
 }
