@@ -31,6 +31,57 @@ Authenticate student, housing staff, or admin.
 
 ---
 
+### **POST /auth/google**
+
+Authenticate with Google Sign-In using a frontend-issued Google ID token.
+
+**Body**
+
+```json
+{
+  "id_token": "google_id_token"
+}
+```
+
+**Behavior**
+
+- Backend verifies the Google ID token signature against Google's public signing certificates.
+- `aud` must match `GOOGLE_CLIENT_ID`.
+- `iss` must be a Google issuer.
+- Email must be verified and in the allowed domain (`GOOGLE_ALLOWED_DOMAIN`, default `nu.edu.kz`).
+- If the user does not exist yet, the backend creates a default `student` account.
+
+**Response**
+
+```json
+{
+  "token": "jwt_token",
+  "user": {
+    "id": 1,
+    "nu_id": "web0000000000000001",
+    "email": "student@nu.edu.kz",
+    "role": "student",
+    "phone": ""
+  }
+}
+```
+
+---
+
+### **GET /auth/oauth/google**
+
+Compatibility endpoint for clients expecting a server-side OAuth redirect flow.
+
+**Behavior**
+
+- This backend does **not** implement the Google authorization-code redirect flow.
+- If `redirect_uri` is provided, the backend redirects back to it with:
+  - `error=unsupported_oauth_flow`
+  - `error_description=Google OAuth redirect flow is not implemented by this backend. Use POST /auth/google with a frontend-issued Google id_token.`
+- Otherwise, it returns `501 Not Implemented`.
+
+---
+
 ### **POST /auth/register**
 
 *(Admins only if staff creation is manual)*

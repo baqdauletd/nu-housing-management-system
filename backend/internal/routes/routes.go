@@ -1,61 +1,58 @@
 package routes
 
 import (
-    "github.com/gin-gonic/gin"
-    "github.com/minio/minio-go/v7"
-    "database/sql"
-    "nu-housing-management-system/backend/internal/handlers"
-    customAuth "nu-housing-management-system/backend/internal/auth"
+	"database/sql"
+
+	customAuth "nu-housing-management-system/backend/internal/auth"
+	"nu-housing-management-system/backend/internal/database"
+	"nu-housing-management-system/backend/internal/handlers"
+
+	"github.com/gin-gonic/gin"
 )
 
 func RegisterRoutes(
-    r *gin.Engine,
-    db *sql.DB,
-    minioClient *minio.Client,
+	r *gin.Engine,
+	db *sql.DB,
+	minioStore *database.MinIOStore,
 ) {
-    // --- AUTH ROUTES ---
-    auth := r.Group("/auth")
-    {
-        auth.POST("/register", handlers.Register(db))
-        auth.POST("/login", handlers.Login(db))
-    }
+	auth := r.Group("/auth")
+	{
+		auth.POST("/google", handlers.GoogleSignIn(db))
+		auth.GET("/oauth/google", handlers.GoogleOAuthStartUnsupported())
+	}
 
-    // --- APPLICATION ROUTES (student only) ---
-    application := r.Group("/applications")
-    application.Use(customAuth.AuthMiddleware(), customAuth.RoleMiddleware("student"))
-    {
-        application.POST("/submit", handlers.SubmitApplication(db))
-        application.GET("/my", handlers.GetMyApplications(db))
-        application.GET("/:id/status", handlers.GetApplicationStatus(db))
-    }
+	application := r.Group("/applications")
+	application.Use(customAuth.AuthMiddleware(), customAuth.RoleMiddleware("student"))
+	{
+		application.POST("/submit", handlers.SubmitApplication(db))
+		application.GET("/my", handlers.GetMyApplications(db))
+		application.GET("/:id/status", handlers.GetApplicationStatus(db))
+	}
 
-    // --- DOCUMENT ROUTES (student + housing - shared middleware) ---
-    documents := r.Group("/documents")
-    documents.Use(customAuth.AuthMiddleware(), customAuth.RoleMiddleware("student", "housing"))
-    {
-        documents.POST("/upload", handlers.UploadDocument(db, minioClient))
-        documents.GET("/:doc_id", handlers.GetDocument(db))
-        documents.GET("/application/:app_id", handlers.GetDocumentsByApplication(db, minioClient))
-    }
+	documents := r.Group("/documents")
+	documents.Use(customAuth.AuthMiddleware(), customAuth.RoleMiddleware("student", "housing"))
+	{
+		documents.POST("/upload", handlers.UploadDocument(db, minioStore))
+		documents.GET("/:doc_id", handlers.GetDocument(db))
+		documents.GET("/application/:app_id", handlers.GetDocumentsByApplication(db, minioStore))
+	}
 
-    // --- HOUSING STAFF ROUTES ---
-    housing := r.Group("/housing")
-    housing.Use(customAuth.AuthMiddleware(), customAuth.RoleMiddleware("housing"))
-    {
-        housing.GET("/applications", handlers.HousingListApplications(db))
-        housing.GET("/applications/:id", handlers.HousingGetApplication(db))
-        housing.PATCH("/applications/:id/approve", handlers.HousingApprove(db))
-        housing.PATCH("/applications/:id/reject", handlers.HousingReject(db))
-    }
+	housing := r.Group("/housing")
+	housing.Use(customAuth.AuthMiddleware(), customAuth.RoleMiddleware("housing"))
+	{
+		housing.GET("/applications", handlers.HousingListApplications(db))
+		housing.GET("/applications/:id", handlers.HousingGetApplication(db))
+		housing.PATCH("/applications/:id/approve", handlers.HousingApprove(db))
+		housing.PATCH("/applications/:id/reject", handlers.HousingReject(db))
+	}
 
-    // --- ADMIN ROUTES ---
-    admin := r.Group("/admin")
-    admin.Use(customAuth.AuthMiddleware(), customAuth.RoleMiddleware("admin"))
-    {
-        admin.GET("/users", handlers.AdminListUsers(db))
-        admin.POST("/create-user", handlers.AdminCreateUser(db))
-        admin.DELETE("/users/:id", handlers.AdminDeleteUser(db))
-        admin.GET("/logs", handlers.AdminSystemLogs(db))
-        admin.GET("/stats", handlers.AdminStats(db))
-    }
+	admin := r.Group("/admin")
+	admin.Use(customAuth.AuthMiddleware(), customAuth.RoleMiddleware("admin"))
+	{
+		admin.GET("/users", handlers.AdminListUsers(db))
+		admin.POST("/create-user", handlers.AdminCreateUser(db))
+		admin.DELETE("/users/:id", handlers.AdminDeleteUser(db))
+		admin.GET("/logs", handlers.AdminSystemLogs(db))
+		admin.GET("/stats", handlers.AdminStats(db))
+	}
 }

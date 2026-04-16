@@ -232,7 +232,7 @@ func GetApplicationStatus(db *sql.DB) gin.HandlerFunc {
 // DOCUMENT HANDLERS
 //////////////////////////////////////////////////////////
 
-func UploadDocument(db *sql.DB, minioClient *minio.Client) gin.HandlerFunc {
+func UploadDocument(db *sql.DB, minioStore *database.MinIOStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		applicationID, err := strconv.Atoi(c.PostForm("application_id"))
 		if err != nil {
@@ -265,7 +265,7 @@ func UploadDocument(db *sql.DB, minioClient *minio.Client) gin.HandlerFunc {
 		defer fileObj.Close()
 
 		objectName := fmt.Sprintf("applications/%d/%s.pdf", applicationID, docType)
-		_, err = minioClient.PutObject(c, "student-documents", objectName, fileObj, file.Size, minio.PutObjectOptions{ContentType: "application/pdf"})
+		_, err = minioStore.Client.PutObject(c, minioStore.Bucket, objectName, fileObj, file.Size, minio.PutObjectOptions{ContentType: "application/pdf"})
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to upload to storage", "details": err.Error()})
 			return
@@ -389,11 +389,10 @@ func AdminListUsers(db *sql.DB) gin.HandlerFunc {
 func AdminCreateUser(db *sql.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var body struct {
-			NuID     string `json:"nu_id" binding:"required"`
-			Email    string `json:"email" binding:"required,email"`
-			Password string `json:"password" binding:"required,min=6"`
-			Phone    string `json:"phone"`
-			Role     string `json:"role" binding:"required"`
+			NuID  string `json:"nu_id" binding:"required"`
+			Email string `json:"email" binding:"required,email"`
+			Phone string `json:"phone"`
+			Role  string `json:"role" binding:"required"`
 		}
 		if err := c.ShouldBindJSON(&body); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid input"})
@@ -404,15 +403,14 @@ func AdminCreateUser(db *sql.DB) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid role"})
 			return
 		}
-		hash, err := auth.HashPassword(body.Password)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "password hashing failed"})
+		if _, err := database.GetUserByEmail(db, body.Email); err == nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "email already used"})
 			return
 		}
 		u := models.User{
 			NuID:         body.NuID,
-			Email:        body.Email,
-			PasswordHash: hash,
+			Email:        strings.ToLower(strings.TrimSpace(body.Email)),
+			PasswordHash: "",
 			RoleID:       roleID,
 			Phone:        &body.Phone,
 		}
@@ -463,7 +461,7 @@ func AdminStats(db *sql.DB) gin.HandlerFunc {
 // DOCUMENT HANDLER
 //////////////////////////////////////////////////////////
 
-func GetDocumentsByApplication(db *sql.DB, minioClient *minio.Client) gin.HandlerFunc {
+func GetDocumentsByApplication(db *sql.DB, minioStore *database.MinIOStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		idStr := c.Param("app_id")
 		appID, _ := strconv.Atoi(idStr)
@@ -482,9 +480,9 @@ func GetDocumentsByApplication(db *sql.DB, minioClient *minio.Client) gin.Handle
 
 		var result []DocResponse
 		for _, doc := range docs {
-			url, err := minioClient.PresignedGetObject(
+			url, err := minioStore.PresignClient.PresignedGetObject(
 				c,
-				"student-documents",
+				minioStore.Bucket,
 				doc.FileURL,
 				24*time.Hour,
 				nil,
