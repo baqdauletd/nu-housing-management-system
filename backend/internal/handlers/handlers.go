@@ -4,19 +4,22 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"fmt"
+	"io"
 	"math/big"
 	"net/http"
+	"net/url"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
-
-	"github.com/gin-gonic/gin"
-	"github.com/lib/pq"
-	"github.com/minio/minio-go/v7"
 
 	"nu-housing-management-system/backend/internal/auth"
 	"nu-housing-management-system/backend/internal/database"
 	"nu-housing-management-system/backend/internal/models"
-	"strings"
+
+	"github.com/gin-gonic/gin"
+	"github.com/lib/pq"
+	"github.com/minio/minio-go/v7"
 )
 
 //////////////////////////////////////////////////////////
@@ -286,7 +289,7 @@ func UploadDocument(db *sql.DB, minioStore *database.MinIOStore) gin.HandlerFunc
 			return
 		}
 
-		if !strings.HasSuffix(file.Filename, ".pdf") {
+		if !strings.EqualFold(filepath.Ext(file.Filename), ".pdf") {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "only PDF files are allowed"})
 			return
 		}
@@ -298,17 +301,32 @@ func UploadDocument(db *sql.DB, minioStore *database.MinIOStore) gin.HandlerFunc
 		}
 		defer fileObj.Close()
 
+		contentType := file.Header.Get("Content-Type")
+		if contentType == "" {
+			contentType = "application/pdf"
+		}
+
 		objectName := fmt.Sprintf("applications/%d/%s.pdf", applicationID, docType)
-		_, err = minioStore.Client.PutObject(c, minioStore.Bucket, objectName, fileObj, file.Size, minio.PutObjectOptions{ContentType: "application/pdf"})
+		_, err = minioStore.Client.PutObject(
+			c,
+			minioStore.Bucket,
+			objectName,
+			fileObj,
+			file.Size,
+			minio.PutObjectOptions{ContentType: contentType},
+		)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to upload to storage", "details": err.Error()})
 			return
 		}
 
+		originalFilename := file.Filename
 		doc := models.Document{
-			ApplicationID: applicationID,
-			Type:          docType,
-			FileURL:       objectName,
+			ApplicationID:    applicationID,
+			Type:             docType,
+			FileURL:          objectName,
+			OriginalFilename: &originalFilename,
+			ContentType:      &contentType,
 		}
 		id, err := database.InsertDocument(db, doc)
 		if err != nil {
@@ -328,7 +346,76 @@ func GetDocument(db *sql.DB) gin.HandlerFunc {
 			c.JSON(http.StatusNotFound, gin.H{"error": "document not found"})
 			return
 		}
-		c.JSON(http.StatusOK, doc)
+
+		if !authorizeApplicationAccess(c, db, doc.ApplicationID) {
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"id":                doc.ID,
+			"application_id":    doc.ApplicationID,
+			"type":              doc.Type,
+			"original_filename": doc.OriginalFilename,
+			"mime_type":         doc.ContentType,
+			"uploaded_at":       doc.UploadedAt,
+			"download_url":      buildDocumentDownloadURL(c, doc.ID),
+		})
+	}
+}
+
+func DownloadDocument(db *sql.DB, minioStore *database.MinIOStore) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		idStr := c.Param("doc_id")
+		id, _ := strconv.Atoi(idStr)
+
+		doc, err := database.GetDocument(db, id)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "document not found"})
+			return
+		}
+
+		if !authorizeApplicationAccess(c, db, doc.ApplicationID) {
+			return
+		}
+
+		if minioStore == nil || minioStore.Client == nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to prepare download"})
+			return
+		}
+
+		object, err := minioStore.Client.GetObject(c, minioStore.Bucket, doc.FileURL, minio.GetObjectOptions{})
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to open document"})
+			return
+		}
+		defer object.Close()
+
+		info, err := object.Stat()
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "document file not found"})
+			return
+		}
+
+		contentType := strings.TrimSpace(derefString(doc.ContentType))
+		if contentType == "" {
+			contentType = strings.TrimSpace(info.ContentType)
+		}
+		if contentType == "" {
+			contentType = "application/octet-stream"
+		}
+
+		filename := strings.TrimSpace(derefString(doc.OriginalFilename))
+		if filename == "" {
+			filename = filepath.Base(doc.FileURL)
+		}
+
+		c.Header("Content-Type", contentType)
+		c.Header("Content-Length", strconv.FormatInt(info.Size, 10))
+		c.Header("Content-Disposition", fmt.Sprintf("inline; filename=%q", filename))
+
+		if _, err := io.Copy(c.Writer, object); err != nil {
+			c.Error(err)
+		}
 	}
 }
 
@@ -500,6 +587,10 @@ func GetDocumentsByApplication(db *sql.DB, minioStore *database.MinIOStore) gin.
 		idStr := c.Param("app_id")
 		appID, _ := strconv.Atoi(idStr)
 
+		if !authorizeApplicationAccess(c, db, appID) {
+			return
+		}
+
 		docs, err := database.GetDocumentsByApplication(db, appID)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch documents"})
@@ -509,26 +600,19 @@ func GetDocumentsByApplication(db *sql.DB, minioStore *database.MinIOStore) gin.
 		type DocResponse struct {
 			ID          int    `json:"id"`
 			Type        string `json:"type"`
+			Name        string `json:"name,omitempty"`
+			Filename    string `json:"filename,omitempty"`
 			DownloadURL string `json:"download_url"`
 		}
 
 		var result []DocResponse
 		for _, doc := range docs {
-			url, err := minioStore.PresignClient.PresignedGetObject(
-				c,
-				minioStore.Bucket,
-				doc.FileURL,
-				24*time.Hour,
-				nil,
-			)
-			if err != nil {
-				continue
-			}
-
 			result = append(result, DocResponse{
 				ID:          doc.ID,
 				Type:        doc.Type,
-				DownloadURL: url.String(),
+				Name:        derefString(doc.OriginalFilename),
+				Filename:    derefString(doc.OriginalFilename),
+				DownloadURL: buildDocumentDownloadURL(c, doc.ID),
 			})
 		}
 
@@ -538,4 +622,79 @@ func GetDocumentsByApplication(db *sql.DB, minioStore *database.MinIOStore) gin.
 
 		c.JSON(http.StatusOK, result)
 	}
+}
+
+func authorizeApplicationAccess(c *gin.Context, db *sql.DB, applicationID int) bool {
+	userID, role, ok := requestIdentity(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing Authorization header"})
+		return false
+	}
+
+	if role == "housing" {
+		return true
+	}
+
+	app, err := database.GetApplicationByID(db, applicationID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "application not found"})
+		return false
+	}
+
+	if app.StudentID != userID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
+		return false
+	}
+
+	return true
+}
+
+func buildDocumentDownloadURL(c *gin.Context, docID int) string {
+	userID, role, ok := requestIdentity(c)
+	if !ok {
+		return ""
+	}
+
+	token, err := auth.GenerateTokenWithTTL(userID, role, 15*time.Minute)
+	if err != nil {
+		return ""
+	}
+
+	scheme := "http"
+	if c.Request.TLS != nil {
+		scheme = "https"
+	}
+	if forwardedProto := c.GetHeader("X-Forwarded-Proto"); forwardedProto != "" {
+		scheme = forwardedProto
+	}
+
+	return fmt.Sprintf("%s://%s/documents/%d/download?token=%s", scheme, c.Request.Host, docID, url.QueryEscape(token))
+}
+
+func requestIdentity(c *gin.Context) (int, string, bool) {
+	if uid, ok := c.Get("user_id"); ok {
+		if roleVal, roleExists := c.Get("role"); roleExists {
+			return uid.(int), roleVal.(string), true
+		}
+	}
+
+	tokenStr := strings.TrimSpace(c.Query("token"))
+	if tokenStr == "" {
+		return 0, "", false
+	}
+
+	claims, err := auth.ParseToken(tokenStr)
+	if err != nil {
+		return 0, "", false
+	}
+
+	return claims.UserID, claims.Role, true
+}
+
+func derefString(value *string) string {
+	if value == nil {
+		return ""
+	}
+
+	return *value
 }

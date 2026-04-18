@@ -1,48 +1,40 @@
 services:
-  postgres:
-    image: postgres:15
-    container_name: postgres_nu_housing
-    environment:
-      POSTGRES_USER: baqdauletd
-      POSTGRES_PASSWORD: fathyu2027
-      POSTGRES_DB: housing
-    volumes:
-    - ./infrastructure/db/schema.sql:/docker-entrypoint-initdb.d/schema.sql
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U baqdauletd -d housing"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-    ports:
-      - "5432:5432"
-  # redis:
-  #   image: redis:alpine
-  #   ports:
-  #     - "6379:6379"
   minio:
-    image: minio/minio
+    image: minio/minio:latest
     container_name: minio_nu_housing
-    restart: always
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY}
     ports:
       - "9000:9000"
       - "9001:9001"
-    environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin123
-    command: server /data --console-address ":9001"
     volumes:
       - minio_data:/data
+
   backend:
-    build: ./backend
+    build:
+      context: ./backend
+    container_name: backend_nu_housing
+    restart: unless-stopped
+    depends_on:
+      - minio
     ports:
       - "8080:8080"
     environment:
-      GIN_MODE: release
-    depends_on:
-      postgres:
-        condition: service_healthy
-      minio:
-        condition: service_started
-      # - redis
+      PORT: 8080
+      POSTGRES_URL: ${POSTGRES_URL}
+      FRONTEND_ORIGINS: ${FRONTEND_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
+      MINIO_ENDPOINT: minio:9000
+      MINIO_PUBLIC_ENDPOINT: ${MINIO_PUBLIC_ENDPOINT:-localhost:9000}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      MINIO_BUCKET: ${MINIO_BUCKET:-housing-documents}
+      MINIO_USE_SSL: ${MINIO_USE_SSL:-false}
+      JWT_SECRET: ${JWT_SECRET}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      GOOGLE_ALLOWED_DOMAIN: ${GOOGLE_ALLOWED_DOMAIN:-nu.edu.kz}
+
 volumes:
   minio_data:

@@ -22,11 +22,15 @@ type Claims struct {
 
 // GenerateToken creates a JWT for a user.
 func GenerateToken(userID int, role string) (string, error) {
+	return GenerateTokenWithTTL(userID, role, 24*time.Hour)
+}
+
+func GenerateTokenWithTTL(userID int, role string, ttl time.Duration) (string, error) {
 	claims := &Claims{
 		UserID: userID,
 		Role:   role,
 		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(ttl)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 		},
 	}

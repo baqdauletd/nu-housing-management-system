@@ -42,6 +42,12 @@ CREATE TABLE documents (
     application_id INT REFERENCES applications(id) ON DELETE CASCADE,
     type VARCHAR(80) NOT NULL,
     file_url TEXT NOT NULL,
+    original_filename TEXT NOT NULL,
+    mime_type VARCHAR(255) NOT NULL,
+    file_size BIGINT NOT NULL,
+    sha256_hash VARCHAR(64) NOT NULL,
+    uploaded_by INT REFERENCES users(id),
+    verification_required BOOLEAN DEFAULT TRUE,
     uploaded_at TIMESTAMP DEFAULT NOW()
 );
 

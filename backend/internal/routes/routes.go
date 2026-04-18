@@ -15,6 +15,8 @@ func RegisterRoutes(
 	db *sql.DB,
 	minioStore *database.MinIOStore,
 ) {
+	r.GET("/documents/:doc_id/download", handlers.DownloadDocument(db, minioStore))
+
 	auth := r.Group("/auth")
 	{
 		auth.POST("/google", handlers.GoogleSignIn(db))

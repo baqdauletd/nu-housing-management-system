@@ -12,12 +12,26 @@ import (
 
 func InsertDocument(db *sql.DB, doc models.Document) (int, error) {
 	query := `
-		INSERT INTO documents (application_id, type, file_url, uploaded_at)
-		VALUES ($1, $2, $3, NOW())
+		INSERT INTO documents (
+			application_id,
+			type,
+			file_url,
+			original_filename,
+			content_type,
+			uploaded_at
+		)
+		VALUES ($1, $2, $3, $4, $5, NOW())
 		RETURNING id
 	`
 	var id int
-	err := db.QueryRow(query, doc.ApplicationID, doc.Type, doc.FileURL).Scan(&id)
+	err := db.QueryRow(
+		query,
+		doc.ApplicationID,
+		doc.Type,
+		doc.FileURL,
+		doc.OriginalFilename,
+		doc.ContentType,
+	).Scan(&id)
 	if err != nil {
 		return 0, err
 	}
@@ -28,7 +42,7 @@ func GetDocument(db *sql.DB, id int) (models.Document, error) {
 	var d models.Document
 
 	query := `
-		SELECT id, application_id, type, file_url, uploaded_at
+		SELECT id, application_id, type, file_url, original_filename, content_type, uploaded_at
 		FROM documents
 		WHERE id = $1
 	`
@@ -38,6 +52,8 @@ func GetDocument(db *sql.DB, id int) (models.Document, error) {
 		&d.ApplicationID,
 		&d.Type,
 		&d.FileURL,
+		&d.OriginalFilename,
+		&d.ContentType,
 		&d.UploadedAt,
 	)
 
@@ -49,7 +65,7 @@ func GetDocument(db *sql.DB, id int) (models.Document, error) {
 
 func GetDocumentsByApplication(db *sql.DB, appID int) ([]models.Document, error) {
 	query := `
-		SELECT id, application_id, type, file_url, uploaded_at
+		SELECT id, application_id, type, file_url, original_filename, content_type, uploaded_at
 		FROM documents
 		WHERE application_id = $1
 	`
@@ -63,7 +79,15 @@ func GetDocumentsByApplication(db *sql.DB, appID int) ([]models.Document, error)
 	var docs []models.Document
 	for rows.Next() {
 		var d models.Document
-		if err := rows.Scan(&d.ID, &d.ApplicationID, &d.Type, &d.FileURL, &d.UploadedAt); err != nil {
+		if err := rows.Scan(
+			&d.ID,
+			&d.ApplicationID,
+			&d.Type,
+			&d.FileURL,
+			&d.OriginalFilename,
+			&d.ContentType,
+			&d.UploadedAt,
+		); err != nil {
 			return nil, err
 		}
 		docs = append(docs, d)
