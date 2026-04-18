@@ -1,6 +1,0 @@
-./chat_api_analyzer.go
-./factory.go
-./openai_analyzer.go
-./pdf.go
-./prompts.go
-./types.go

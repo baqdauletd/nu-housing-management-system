@@ -1,9 +1,0 @@
-./admin_queries.go
-./application_queries.go
-./document_queries.go
-./housing_queries.go
-./minio.go
-./postgres.go
-./redis.go
-./role_queries.go
-./user_queries.go
