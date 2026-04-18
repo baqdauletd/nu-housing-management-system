@@ -32,13 +32,15 @@ func DetermineAutomatedDecision(app models.Application, analyses []models.Docume
 
 	latestByType := make(map[string]models.DocumentAnalysis, len(analyses))
 	for _, docAnalysis := range analyses {
-		docType := strings.TrimSpace(docAnalysis.ExpectedType)
-		if docType == "" {
+		docType, ok := analysis.NormalizeDocumentType(docAnalysis.ExpectedType)
+		if !ok {
 			continue
 		}
-		current, exists := latestByType[docType]
+		docTypeKey := string(docType)
+		current, exists := latestByType[docTypeKey]
 		if !exists || docAnalysis.AnalyzedAt.After(current.AnalyzedAt) {
-			latestByType[docType] = docAnalysis
+			docAnalysis.ExpectedType = docTypeKey
+			latestByType[docTypeKey] = docAnalysis
 		}
 	}
 
