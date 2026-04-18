@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"bytes"
 	"crypto/rand"
 	"database/sql"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"nu-housing-management-system/backend/internal/analysis"
 	"nu-housing-management-system/backend/internal/auth"
 	"nu-housing-management-system/backend/internal/database"
 	"nu-housing-management-system/backend/internal/models"
@@ -20,6 +22,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/lib/pq"
 	"github.com/minio/minio-go/v7"
+	"github.com/spf13/viper"
 )
 
 //////////////////////////////////////////////////////////
@@ -248,6 +251,17 @@ func GetMyApplications(db *sql.DB) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch applications", "details": err.Error()})
 			return
 		}
+		for i := range apps {
+			if err := database.ApplyAutomatedDecision(db, apps[i].ID); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to refresh application status", "details": err.Error()})
+				return
+			}
+		}
+		apps, err = database.GetApplicationsByStudent(db, studentID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch refreshed applications", "details": err.Error()})
+			return
+		}
 		c.JSON(http.StatusOK, apps)
 	}
 }
@@ -256,12 +270,21 @@ func GetApplicationStatus(db *sql.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		idStr := c.Param("id")
 		id, _ := strconv.Atoi(idStr)
+		if err := database.ApplyAutomatedDecision(db, id); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to refresh application status", "details": err.Error()})
+			return
+		}
 		app, err := database.GetApplicationByID(db, id)
 		if err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "application not found"})
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"status": app.Status, "rejected_reason": app.RejectedReason})
+		c.JSON(http.StatusOK, gin.H{
+			"status":          app.Status,
+			"reason":          app.DecisionReason,
+			"decision_reason": app.DecisionReason,
+			"rejected_reason": app.RejectedReason,
+		})
 	}
 }
 
@@ -301,6 +324,16 @@ func UploadDocument(db *sql.DB, minioStore *database.MinIOStore) gin.HandlerFunc
 		}
 		defer fileObj.Close()
 
+		if !authorizeApplicationAccess(c, db, applicationID) {
+			return
+		}
+
+		pdfBytes, err := io.ReadAll(fileObj)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read file"})
+			return
+		}
+
 		contentType := file.Header.Get("Content-Type")
 		if contentType == "" {
 			contentType = "application/pdf"
@@ -311,8 +344,8 @@ func UploadDocument(db *sql.DB, minioStore *database.MinIOStore) gin.HandlerFunc
 			c,
 			minioStore.Bucket,
 			objectName,
-			fileObj,
-			file.Size,
+			bytes.NewReader(pdfBytes),
+			int64(len(pdfBytes)),
 			minio.PutObjectOptions{ContentType: contentType},
 		)
 		if err != nil {
@@ -333,8 +366,75 @@ func UploadDocument(db *sql.DB, minioStore *database.MinIOStore) gin.HandlerFunc
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save document into db", "details": err.Error()})
 			return
 		}
+
+		if err := analyzeAndApplyDecision(c, db, applicationID, id, docType, pdfBytes); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to analyze uploaded document", "details": err.Error()})
+			return
+		}
 		c.JSON(http.StatusCreated, gin.H{"document_id": id})
 	}
+}
+
+func analyzeAndApplyDecision(c *gin.Context, db *sql.DB, applicationID, documentID int, docType string, pdfBytes []byte) error {
+	expectedType, ok := analysis.NormalizeDocumentType(docType)
+	if !ok {
+		result := analysis.ManualReviewResult(
+			analysis.Request{
+				DocumentID: documentID,
+				Application: analysis.ApplicationContext{
+					ApplicationID: applicationID,
+				},
+			},
+			"",
+			fmt.Sprintf("Manual review required because the uploaded document type %q is not supported for automatic Astana checks.", docType),
+			"unsupported_document_type",
+		)
+		if err := database.UpsertDocumentAnalysis(db, result); err != nil {
+			return err
+		}
+		return database.ApplyAutomatedDecision(db, applicationID)
+	}
+
+	app, err := database.GetApplicationByID(db, applicationID)
+	if err != nil {
+		return err
+	}
+	user, err := database.GetUserByID(db, app.StudentID)
+	if err != nil {
+		return err
+	}
+
+	analyzer := analysis.NewOpenAIAnalyzer(viper.GetString("OPENAI_API_KEY"), viper.GetString("OPENAI_MODEL"))
+	req := analysis.Request{
+		DocumentID:   documentID,
+		ExpectedType: expectedType,
+		PDFBytes:     pdfBytes,
+		Application: analysis.ApplicationContext{
+			ApplicationID:  app.ID,
+			StudentID:      app.StudentID,
+			StudentEmail:   user.Email,
+			StudentNuID:    user.NuID,
+			Year:           app.Year,
+			Major:          app.Major,
+			Gender:         app.Gender,
+			RoomPreference: app.RoomPreference,
+			AdditionalInfo: app.AdditionalInfo,
+			SubmittedAt:    app.SubmittedAt,
+			UploadTime:     time.Now().UTC(),
+		},
+	}
+
+	result, analyzeErr := analyzer.AnalyzeDocument(c, req)
+	if err := database.UpsertDocumentAnalysis(db, result); err != nil {
+		return err
+	}
+	if err := database.ApplyAutomatedDecision(db, applicationID); err != nil {
+		return err
+	}
+	if analyzeErr != nil {
+		return nil
+	}
+	return nil
 }
 
 func GetDocument(db *sql.DB) gin.HandlerFunc {

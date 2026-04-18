@@ -14,6 +14,7 @@ type Application struct {
 	SubmittedAt     time.Time  `json:"submitted_at"`
 	UpdatedAt       time.Time  `json:"updated_at"`
 	RejectedReason  *string    `json:"rejected_reason,omitempty"`
+	DecisionReason  *string    `json:"decision_reason,omitempty"`
 	ReviewedBy      *int       `json:"reviewed_by,omitempty"`
 	ReviewTimestamp *time.Time `json:"review_timestamp,omitempty"`
 }

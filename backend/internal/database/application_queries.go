@@ -51,6 +51,7 @@ func GetApplicationByID(db *sql.DB, id int) (models.Application, error) {
 	if err == sql.ErrNoRows {
 		return a, errors.New("application not found")
 	}
+	a.DecisionReason = a.RejectedReason
 	return a, err
 }
 
@@ -89,6 +90,7 @@ func GetApplicationsByStudent(db *sql.DB, studentID int) ([]models.Application, 
 		); err != nil {
 			return nil, err
 		}
+		a.DecisionReason = a.RejectedReason
 		apps = append(apps, a)
 	}
 	return apps, nil
@@ -104,6 +106,20 @@ func UpdateApplicationStatus(db *sql.DB, id int, status string, reviewerID int) 
 		WHERE id = $3
 	`
 	_, err := db.Exec(query, status, reviewerID, id)
+	return err
+}
+
+func SetApplicationDecision(db *sql.DB, id int, status string, reason string) error {
+	query := `
+		UPDATE applications
+		SET status = $1,
+		    rejected_reason = NULLIF($2, ''),
+		    reviewed_by = NULL,
+		    review_timestamp = NOW(),
+		    updated_at = NOW()
+		WHERE id = $3
+	`
+	_, err := db.Exec(query, status, reason, id)
 	return err
 }
 
