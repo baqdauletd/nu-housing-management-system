@@ -26,7 +26,7 @@ func GetApplicationByID(db *sql.DB, id int) (models.Application, error) {
 	var a models.Application
 
 	query := `
-		SELECT id, student_id, year, major, gender, room_preference, additional_info,
+		SELECT id, student_id, year, major, gender, COALESCE(room_preference, ''), COALESCE(additional_info, ''),
 		       status, submitted_at, updated_at, rejected_reason, reviewed_by, review_timestamp
 		FROM applications
 		WHERE id = $1
@@ -57,7 +57,7 @@ func GetApplicationByID(db *sql.DB, id int) (models.Application, error) {
 
 func GetApplicationsByStudent(db *sql.DB, studentID int) ([]models.Application, error) {
 	query := `
-		SELECT id, student_id, year, major, gender, room_preference, additional_info,
+		SELECT id, student_id, year, major, gender, COALESCE(room_preference, ''), COALESCE(additional_info, ''),
 		       status, submitted_at, updated_at, rejected_reason, reviewed_by, review_timestamp
 		FROM applications
 		WHERE student_id = $1
