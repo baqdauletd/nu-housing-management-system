@@ -44,6 +44,17 @@ func DetermineAutomatedDecision(app models.Application, analyses []models.Docume
 		}
 	}
 
+	for _, requiredType := range requiredAutomatedDocumentTypes {
+		docAnalysis, ok := latestByType[requiredType]
+		if !ok {
+			continue
+		}
+		switch strings.ToLower(strings.TrimSpace(docAnalysis.Status)) {
+		case string(analysis.StatusFailed):
+			return AutomatedDecision{Status: "rejected", Reason: docAnalysis.ReasoningSummary}
+		}
+	}
+
 	missing := make([]string, 0, len(requiredAutomatedDocumentTypes))
 	for _, requiredType := range requiredAutomatedDocumentTypes {
 		if _, ok := latestByType[requiredType]; !ok {
@@ -60,8 +71,6 @@ func DetermineAutomatedDecision(app models.Application, analyses []models.Docume
 	for _, requiredType := range requiredAutomatedDocumentTypes {
 		docAnalysis := latestByType[requiredType]
 		switch strings.ToLower(strings.TrimSpace(docAnalysis.Status)) {
-		case string(analysis.StatusFailed):
-			return AutomatedDecision{Status: "rejected", Reason: docAnalysis.ReasoningSummary}
 		case string(analysis.StatusManualReview), "":
 			return AutomatedDecision{
 				Status: "pending",
