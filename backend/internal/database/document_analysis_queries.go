@@ -83,8 +83,8 @@ func ListDocumentAnalysesByApplicationID(db *sql.DB, applicationID int) ([]model
 		       d.type,
 		       COALESCE(NULLIF(de.detected_doc_type, ''), 'unknown'),
 		       CASE
-		           WHEN de.processing_status <> 'completed' OR de.requires_manual_review THEN 'manual_review'
 		           WHEN de.property_in_astana OR de.registration_in_astana OR de.workplace_in_astana THEN 'failed'
+		           WHEN de.processing_status <> 'completed' OR de.requires_manual_review THEN 'manual_review'
 		           ELSE 'passed'
 		       END AS status,
 		       de.property_in_astana,
