@@ -359,6 +359,25 @@ Dashboard metrics.
 
 ## 3. System-Wide Settings
 
+### **GET /settings**
+
+Get the current application availability for authenticated users.
+
+**Response**
+
+```json
+{
+  "id": 1,
+  "applications_enabled": true,
+  "is_application_open": true,
+  "application_open": "2025-08-01",
+  "application_close": "2025-09-01",
+  "required_documents": ["id_card", "enrollment_certificate"]
+}
+```
+
+---
+
 ### **GET /admin/settings**
 
 Get current system settings.
@@ -373,6 +392,7 @@ Update settings.
 
 ```json
 {
+  "applications_enabled": true,
   "application_open": "2025-08-01",
   "application_close": "2025-09-01",
   "required_documents": ["id_card", "enrollment_certificate"]

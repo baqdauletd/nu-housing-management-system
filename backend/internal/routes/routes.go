@@ -39,6 +39,12 @@ func RegisterRoutes(
 		documents.GET("/application/:app_id", handlers.GetDocumentsByApplication(db, minioStore))
 	}
 
+	settings := r.Group("/settings")
+	settings.Use(customAuth.AuthMiddleware(), customAuth.RoleMiddleware("student", "housing", "admin"))
+	{
+		settings.GET("", handlers.GetSystemSettings(db))
+	}
+
 	housing := r.Group("/housing")
 	housing.Use(customAuth.AuthMiddleware(), customAuth.RoleMiddleware("housing"))
 	{
@@ -46,6 +52,8 @@ func RegisterRoutes(
 		housing.GET("/applications/:id", handlers.HousingGetApplication(db))
 		housing.PATCH("/applications/:id/approve", handlers.HousingApprove(db))
 		housing.PATCH("/applications/:id/reject", handlers.HousingReject(db))
+		housing.GET("/settings", handlers.GetSystemSettings(db))
+		housing.PATCH("/settings", handlers.UpdateSystemSettings(db))
 	}
 
 	admin := r.Group("/admin")
@@ -56,5 +64,7 @@ func RegisterRoutes(
 		admin.DELETE("/users/:id", handlers.AdminDeleteUser(db))
 		admin.GET("/logs", handlers.AdminSystemLogs(db))
 		admin.GET("/stats", handlers.AdminStats(db))
+		admin.GET("/settings", handlers.GetSystemSettings(db))
+		admin.PATCH("/settings", handlers.UpdateSystemSettings(db))
 	}
 }

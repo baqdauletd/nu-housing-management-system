@@ -77,13 +77,14 @@ CREATE TABLE notifications (
 
 CREATE TABLE system_settings (
     id SERIAL PRIMARY KEY,
+    applications_enabled BOOLEAN NOT NULL DEFAULT TRUE,
     application_open DATE,
     application_close DATE,
     required_documents JSONB DEFAULT '[]'
 );
 
-INSERT INTO system_settings (application_open, application_close, required_documents)
-VALUES ('2025-01-01', '2025-12-31', '["id_card", "enrollment_certificate"]');
+INSERT INTO system_settings (applications_enabled, application_open, application_close, required_documents)
+VALUES (TRUE, '2025-01-01', '2025-12-31', '["id_card", "enrollment_certificate"]');
 
 CREATE TABLE audit_logs (
     id SERIAL PRIMARY KEY,

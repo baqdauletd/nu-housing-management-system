@@ -4,9 +4,18 @@ import (
 	"database/sql"
 	"errors"
 	"nu-housing-management-system/backend/internal/models"
+	"time"
 )
 
 func SubmitApplication(db *sql.DB, a models.Application) (int, error) {
+	settings, err := GetSystemSettings(db)
+	if err != nil {
+		return 0, err
+	}
+	if !IsApplicationsOpen(settings, time.Now()) {
+		return 0, errors.New("applications are currently closed")
+	}
+
 	query := `
 		INSERT INTO applications
 		(student_id, fio, year, major, gender, room_preference, additional_info, status, submitted_at, updated_at)
@@ -14,7 +23,7 @@ func SubmitApplication(db *sql.DB, a models.Application) (int, error) {
 		RETURNING id
 	`
 	var id int
-	err := db.QueryRow(query, a.StudentID, a.FIO, a.Year, a.Major, a.Gender, a.RoomPreference, a.AdditionalInfo).Scan(&id)
+	err = db.QueryRow(query, a.StudentID, a.Year, a.Major, a.Gender, a.RoomPreference, a.AdditionalInfo).Scan(&id)
 	if err != nil {
 		return 0, err
 	}

@@ -220,6 +220,21 @@ func SubmitApplication(db *sql.DB) gin.HandlerFunc {
 		}
 		studentID := uid.(int)
 
+		settings, err := database.GetSystemSettings(db)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load application settings", "details": err.Error()})
+			return
+		}
+		if !database.IsApplicationsOpen(settings, time.Now()) {
+			c.JSON(http.StatusForbidden, gin.H{
+				"error":                "applications are currently closed",
+				"applications_enabled": settings.ApplicationsEnabled,
+				"application_open":     formatDatePtr(settings.ApplicationOpen),
+				"application_close":    formatDatePtr(settings.ApplicationClose),
+			})
+			return
+		}
+
 		app := models.Application{
 			StudentID:      studentID,
 			FIO:            strings.TrimSpace(body.FIO),
@@ -287,6 +302,84 @@ func GetApplicationStatus(db *sql.DB) gin.HandlerFunc {
 			"decision_reason": app.DecisionReason,
 			"rejected_reason": app.RejectedReason,
 		})
+	}
+}
+
+func GetSystemSettings(db *sql.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		settings, err := database.GetSystemSettings(db)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch system settings", "details": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, buildSystemSettingsResponse(settings))
+	}
+}
+
+func UpdateSystemSettings(db *sql.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var body struct {
+			ApplicationsEnabled *bool     `json:"applications_enabled"`
+			ApplicationOpen     *string   `json:"application_open"`
+			ApplicationClose    *string   `json:"application_close"`
+			RequiredDocuments   *[]string `json:"required_documents"`
+		}
+		if err := c.ShouldBindJSON(&body); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid input", "details": err.Error()})
+			return
+		}
+
+		settings, err := database.GetSystemSettings(db)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load current settings", "details": err.Error()})
+			return
+		}
+
+		if body.ApplicationsEnabled != nil {
+			settings.ApplicationsEnabled = *body.ApplicationsEnabled
+		}
+
+		if body.ApplicationOpen != nil {
+			parsedDate, err := parseDateField(*body.ApplicationOpen)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid application_open", "details": "expected YYYY-MM-DD or empty string"})
+				return
+			}
+			settings.ApplicationOpen = parsedDate
+		}
+
+		if body.ApplicationClose != nil {
+			parsedDate, err := parseDateField(*body.ApplicationClose)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid application_close", "details": "expected YYYY-MM-DD or empty string"})
+				return
+			}
+			settings.ApplicationClose = parsedDate
+		}
+
+		if settings.ApplicationOpen != nil && settings.ApplicationClose != nil && settings.ApplicationClose.Before(*settings.ApplicationOpen) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "application_close must be on or after application_open"})
+			return
+		}
+
+		if body.RequiredDocuments != nil {
+			settings.RequiredDocuments = *body.RequiredDocuments
+		}
+		if settings.RequiredDocuments == nil {
+			settings.RequiredDocuments = []string{}
+		}
+
+		settings, err = database.UpdateSystemSettings(db, settings)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update system settings", "details": err.Error()})
+			return
+		}
+
+		if userID, _, ok := requestIdentity(c); ok {
+			db.Exec(`INSERT INTO audit_logs (actor_id, action, entity, entity_id) VALUES ($1, 'update_settings', 'system_settings', $2)`, userID, settings.ID)
+		}
+
+		c.JSON(http.StatusOK, buildSystemSettingsResponse(settings))
 	}
 }
 
@@ -821,4 +914,36 @@ func derefString(value *string) string {
 	}
 
 	return *value
+}
+
+func buildSystemSettingsResponse(settings models.SystemSettings) gin.H {
+	return gin.H{
+		"id":                   settings.ID,
+		"applications_enabled": settings.ApplicationsEnabled,
+		"is_application_open":  database.IsApplicationsOpen(settings, time.Now()),
+		"application_open":     formatDatePtr(settings.ApplicationOpen),
+		"application_close":    formatDatePtr(settings.ApplicationClose),
+		"required_documents":   settings.RequiredDocuments,
+	}
+}
+
+func formatDatePtr(value *time.Time) any {
+	if value == nil {
+		return nil
+	}
+	return value.UTC().Format("2006-01-02")
+}
+
+func parseDateField(raw string) (*time.Time, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+
+	parsed, err := time.Parse("2006-01-02", raw)
+	if err != nil {
+		return nil, err
+	}
+	date := parsed.UTC()
+	return &date, nil
 }
