@@ -1,0 +1,4 @@
+./openai_analyzer.go
+./pdf.go
+./types.go
+./types_test.go

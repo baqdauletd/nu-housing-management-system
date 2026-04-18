@@ -43,12 +43,27 @@ CREATE TABLE documents (
     type VARCHAR(80) NOT NULL,
     file_url TEXT NOT NULL,
     original_filename TEXT NOT NULL,
-    mime_type VARCHAR(255) NOT NULL,
-    file_size BIGINT NOT NULL,
-    sha256_hash VARCHAR(64) NOT NULL,
-    uploaded_by INT REFERENCES users(id),
-    verification_required BOOLEAN DEFAULT TRUE,
+    content_type VARCHAR(255) NOT NULL,
     uploaded_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE document_analysis (
+    id SERIAL PRIMARY KEY,
+    document_id INT UNIQUE REFERENCES documents(id) ON DELETE CASCADE,
+    application_id INT REFERENCES applications(id) ON DELETE CASCADE,
+    expected_type VARCHAR(80) NOT NULL,
+    detected_category VARCHAR(40) NOT NULL,
+    status VARCHAR(30) NOT NULL,
+    has_astana_property BOOLEAN NOT NULL DEFAULT FALSE,
+    has_astana_residence BOOLEAN NOT NULL DEFAULT FALSE,
+    has_astana_employment BOOLEAN NOT NULL DEFAULT FALSE,
+    issues_json JSONB NOT NULL DEFAULT '[]',
+    reasoning_summary TEXT NOT NULL DEFAULT '',
+    extracted_text_preview TEXT NOT NULL DEFAULT '',
+    raw_ai_json TEXT NOT NULL DEFAULT '',
+    analyzed_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE notifications (

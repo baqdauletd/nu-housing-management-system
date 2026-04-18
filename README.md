@@ -45,6 +45,8 @@ Usually kept as-is for local Docker:
 
 Optional unless your auth flow needs it:
 - `GOOGLE_CLIENT_ID`
+- `OPENAI_API_KEY`
+- `OPENAI_MODEL`
 
 ## Local Docker Notes
 
@@ -89,3 +91,11 @@ If documents do not open:
 If Docker starts but backend cannot reach the database:
 - verify the Supabase or Postgres host allows your teammate's network
 - verify the URL and credentials in `POSTGRES_URL`
+
+## Database Migration
+
+For an existing database, apply the document-analysis migration before starting the updated backend:
+
+```bash
+psql "$POSTGRES_URL" -f infrastructure/db/2026-04-18_document_analysis_migration.sql
+```
