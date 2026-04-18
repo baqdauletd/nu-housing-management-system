@@ -3,8 +3,11 @@ package analysis
 import (
 	"context"
 	"encoding/json"
+	"slices"
+	"sort"
 	"strings"
 	"time"
+	"unicode"
 )
 
 type DocumentType string
@@ -191,6 +194,70 @@ func NormalizeExtractedText(text string) string {
 	return strings.Join(strings.Fields(text), " ")
 }
 
+func normalizeFIOWords(value string) []string {
+	value = strings.ToValidUTF8(value, "")
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "" {
+		return nil
+	}
+
+	fields := strings.FieldsFunc(value, func(r rune) bool {
+		return unicode.IsSpace(r) || r == ',' || r == '.' || r == ';' || r == ':' || r == '-' || r == '_' || r == '(' || r == ')' || r == '"'
+	})
+
+	words := make([]string, 0, len(fields))
+	for _, field := range fields {
+		field = strings.TrimSpace(field)
+		if field == "" {
+			continue
+		}
+		words = append(words, field)
+	}
+	return words
+}
+
+func fioWordsMatch(applicationFIO, extractedFIO string) bool {
+	appWords := normalizeFIOWords(applicationFIO)
+	docWords := normalizeFIOWords(extractedFIO)
+	if len(appWords) < 2 || len(docWords) < 2 {
+		return false
+	}
+
+	appUnique := make([]string, 0, len(appWords))
+	for _, word := range appWords {
+		if !slices.Contains(appUnique, word) {
+			appUnique = append(appUnique, word)
+		}
+	}
+
+	docUnique := make([]string, 0, len(docWords))
+	for _, word := range docWords {
+		if !slices.Contains(docUnique, word) {
+			docUnique = append(docUnique, word)
+		}
+	}
+
+	sort.Strings(appUnique)
+	sort.Strings(docUnique)
+
+	matches := 0
+	i, j := 0, 0
+	for i < len(appUnique) && j < len(docUnique) {
+		switch {
+		case appUnique[i] == docUnique[j]:
+			matches++
+			i++
+			j++
+		case appUnique[i] < docUnique[j]:
+			i++
+		default:
+			j++
+		}
+	}
+
+	return matches >= 2
+}
+
 func ManualReviewResult(req Request, preview string, summary string, issues ...string) Result {
 	return Result{
 		DocumentID:           req.DocumentID,
@@ -260,6 +327,7 @@ func PostProcessResult(req Request, extractedText string, aiResult aiResponse, r
 	if RequiresApplicantNameMatch(req.ExpectedType) {
 		appFIO := NormalizeExtractedText(req.Application.StudentFIO)
 		extractedFIO := NormalizeExtractedText(aiResult.ExtractedFIO)
+		matchedApplicantFIO := aiResult.MatchedApplicantFIO || fioWordsMatch(appFIO, extractedFIO)
 		if appFIO == "" {
 			status = StatusManualReview
 			issues = append(issues, "missing_application_fio")
@@ -268,11 +336,12 @@ func PostProcessResult(req Request, extractedText string, aiResult aiResponse, r
 			status = StatusManualReview
 			issues = append(issues, "missing_document_fio")
 			reasoning = "Manual review required because the self-document does not contain a clear Cyrillic FIO to compare with the application."
-		} else if !aiResult.MatchedApplicantFIO {
+		} else if !matchedApplicantFIO {
 			status = StatusFailed
 			issues = append(issues, "applicant_name_mismatch")
 			reasoning = "The Cyrillic FIO in the applicant's own document does not match the FIO in the application."
 		}
+		aiResult.MatchedApplicantFIO = matchedApplicantFIO
 	}
 
 	return Result{

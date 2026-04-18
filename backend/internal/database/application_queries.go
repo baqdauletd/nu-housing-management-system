@@ -52,6 +52,7 @@ func GetApplicationByID(db *sql.DB, id int) (models.Application, error) {
 	if err == sql.ErrNoRows {
 		return a, errors.New("application not found")
 	}
+	normalizeApplicationFIO(&a)
 	a.DecisionReason = a.RejectedReason
 	return a, err
 }
@@ -92,6 +93,7 @@ func GetApplicationsByStudent(db *sql.DB, studentID int) ([]models.Application, 
 		); err != nil {
 			return nil, err
 		}
+		normalizeApplicationFIO(&a)
 		a.DecisionReason = a.RejectedReason
 		apps = append(apps, a)
 	}

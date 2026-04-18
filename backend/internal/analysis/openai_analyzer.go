@@ -109,18 +109,9 @@ func (a *OpenAIAnalyzer) callOpenAI(ctx context.Context, req Request, extractedT
 	httpReq.Header.Set("Authorization", "Bearer "+a.apiKey)
 	httpReq.Header.Set("Content-Type", "application/json")
 
-	resp, err := a.httpClient.Do(httpReq)
-	if err != nil {
-		return "", aiResponse{}, fmt.Errorf("openai request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	responseBytes, err := io.ReadAll(resp.Body)
+	responseBytes, err := a.doJSONRequestWithRetry(ctx, httpReq)
 	if err != nil {
 		return "", aiResponse{}, err
-	}
-	if resp.StatusCode >= http.StatusBadRequest {
-		return "", aiResponse{}, fmt.Errorf("openai returned status %d: %s", resp.StatusCode, strings.TrimSpace(string(responseBytes)))
 	}
 
 	outputText, err := extractResponseOutputText(responseBytes)
@@ -161,18 +152,9 @@ func (a *OpenAIAnalyzer) uploadPDFFile(ctx context.Context, pdfBytes []byte) (st
 	httpReq.Header.Set("Authorization", "Bearer "+a.apiKey)
 	httpReq.Header.Set("Content-Type", writer.FormDataContentType())
 
-	resp, err := a.httpClient.Do(httpReq)
+	responseBytes, err := a.doJSONRequestWithRetry(ctx, httpReq)
 	if err != nil {
 		return "", fmt.Errorf("openai file upload failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	responseBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", err
-	}
-	if resp.StatusCode >= http.StatusBadRequest {
-		return "", fmt.Errorf("openai file upload returned status %d: %s", resp.StatusCode, strings.TrimSpace(string(responseBytes)))
 	}
 
 	var fileResp struct {
@@ -185,6 +167,52 @@ func (a *OpenAIAnalyzer) uploadPDFFile(ctx context.Context, pdfBytes []byte) (st
 		return "", fmt.Errorf("openai file upload response missing file id")
 	}
 	return fileResp.ID, nil
+}
+
+func (a *OpenAIAnalyzer) doJSONRequestWithRetry(ctx context.Context, req *http.Request) ([]byte, error) {
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		cloned := req.Clone(ctx)
+		if req.GetBody != nil {
+			body, err := req.GetBody()
+			if err != nil {
+				return nil, err
+			}
+			cloned.Body = body
+		}
+
+		resp, err := a.httpClient.Do(cloned)
+		if err != nil {
+			lastErr = fmt.Errorf("openai request failed: %w", err)
+		} else {
+			responseBytes, readErr := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if readErr != nil {
+				return nil, readErr
+			}
+			if resp.StatusCode < http.StatusBadRequest {
+				return responseBytes, nil
+			}
+
+			lastErr = fmt.Errorf("openai returned status %d: %s", resp.StatusCode, strings.TrimSpace(string(responseBytes)))
+			if resp.StatusCode != http.StatusInternalServerError &&
+				resp.StatusCode != http.StatusBadGateway &&
+				resp.StatusCode != http.StatusServiceUnavailable &&
+				resp.StatusCode != http.StatusGatewayTimeout {
+				return nil, lastErr
+			}
+		}
+
+		if attempt < 2 {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(time.Duration(attempt+1) * 2 * time.Second):
+			}
+		}
+	}
+
+	return nil, lastErr
 }
 
 func extractResponseOutputText(responseBytes []byte) (string, error) {

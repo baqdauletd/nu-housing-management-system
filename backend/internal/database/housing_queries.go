@@ -41,6 +41,7 @@ func HousingListApplications(db *sql.DB) ([]models.Application, error) {
 		); err != nil {
 			return nil, err
 		}
+		normalizeApplicationFIO(&a)
 		apps = append(apps, a)
 	}
 

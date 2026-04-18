@@ -229,6 +229,9 @@ func SubmitApplication(db *sql.DB) gin.HandlerFunc {
 			RoomPreference: body.RoomPreference,
 			AdditionalInfo: body.AdditionalInfo,
 		}
+		if app.FIO == "" {
+			app.FIO = database.ExtractFIOForSubmission(body.AdditionalInfo)
+		}
 
 		id, err := database.SubmitApplication(db, app)
 		if err != nil {
@@ -264,7 +267,52 @@ func GetMyApplications(db *sql.DB) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch refreshed applications", "details": err.Error()})
 			return
 		}
-		c.JSON(http.StatusOK, apps)
+
+		response := make([]gin.H, 0, len(apps))
+		for _, app := range apps {
+			analyses, err := database.ListDocumentAnalysesByApplicationID(db, app.ID)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch application review details", "details": err.Error()})
+				return
+			}
+
+			manualReviewReasons := make([]string, 0)
+			reviewReasons := make([]string, 0)
+			for _, analysisRow := range analyses {
+				reason := strings.TrimSpace(analysisRow.ReasoningSummary)
+				if reason == "" {
+					continue
+				}
+				if analysisRow.Status != string(analysis.StatusPassed) {
+					reviewReasons = append(reviewReasons, fmt.Sprintf("%s: %s", analysisRow.ExpectedType, reason))
+				}
+				if analysisRow.Status == string(analysis.StatusManualReview) {
+					manualReviewReasons = append(manualReviewReasons, fmt.Sprintf("%s: %s", analysisRow.ExpectedType, reason))
+				}
+			}
+
+			response = append(response, gin.H{
+				"id":                    app.ID,
+				"student_id":            app.StudentID,
+				"fio":                   app.FIO,
+				"year":                  app.Year,
+				"major":                 app.Major,
+				"gender":                app.Gender,
+				"room_preference":       app.RoomPreference,
+				"additional_info":       app.AdditionalInfo,
+				"status":                app.Status,
+				"submitted_at":          app.SubmittedAt,
+				"updated_at":            app.UpdatedAt,
+				"rejected_reason":       app.RejectedReason,
+				"decision_reason":       app.DecisionReason,
+				"reviewed_by":           app.ReviewedBy,
+				"review_timestamp":      app.ReviewTimestamp,
+				"manual_review_reasons": manualReviewReasons,
+				"review_reasons":        reviewReasons,
+			})
+		}
+
+		c.JSON(http.StatusOK, response)
 	}
 }
 
@@ -701,21 +749,67 @@ func GetDocumentsByApplication(db *sql.DB, minioStore *database.MinIOStore) gin.
 		}
 
 		type DocResponse struct {
-			ID          int    `json:"id"`
-			Type        string `json:"type"`
-			Name        string `json:"name,omitempty"`
-			Filename    string `json:"filename,omitempty"`
-			DownloadURL string `json:"download_url"`
+			ID                 int      `json:"id"`
+			Type               string   `json:"type"`
+			Name               string   `json:"name,omitempty"`
+			Filename           string   `json:"filename,omitempty"`
+			DownloadURL        string   `json:"download_url"`
+			Status             string   `json:"status,omitempty"`
+			Decision           string   `json:"decision,omitempty"`
+			ManualReviewReason string   `json:"manual_review_reason,omitempty"`
+			ReviewReason       string   `json:"review_reason,omitempty"`
+			Reasoning          string   `json:"reasoning,omitempty"`
+			Issues             []string `json:"issues,omitempty"`
+			DetectedCategory   string   `json:"detected_category,omitempty"`
+		}
+
+		analyses, err := database.ListDocumentAnalysesByApplicationID(db, appID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch document review details"})
+			return
+		}
+		analysisByDocumentID := make(map[int]models.DocumentAnalysis, len(analyses))
+		for _, analysisRow := range analyses {
+			analysisByDocumentID[analysisRow.DocumentID] = analysisRow
 		}
 
 		var result []DocResponse
 		for _, doc := range docs {
+			analysisRow, ok := analysisByDocumentID[doc.ID]
+			status := ""
+			decision := ""
+			manualReviewReason := ""
+			reviewReason := ""
+			reasoning := ""
+			issues := []string{}
+			detectedCategory := ""
+			if ok {
+				status = analysisRow.Status
+				decision = analysisRow.Status
+				detectedCategory = analysisRow.DetectedCategory
+				issues = analysisRow.Issues
+				if analysisRow.Status != string(analysis.StatusPassed) {
+					reasoning = analysisRow.ReasoningSummary
+					reviewReason = analysisRow.ReasoningSummary
+				}
+				if analysisRow.Status == string(analysis.StatusManualReview) {
+					manualReviewReason = analysisRow.ReasoningSummary
+				}
+			}
+
 			result = append(result, DocResponse{
-				ID:          doc.ID,
-				Type:        doc.Type,
-				Name:        derefString(doc.OriginalFilename),
-				Filename:    derefString(doc.OriginalFilename),
-				DownloadURL: buildDocumentDownloadURL(c, doc.ID),
+				ID:                 doc.ID,
+				Type:               doc.Type,
+				Name:               derefString(doc.OriginalFilename),
+				Filename:           derefString(doc.OriginalFilename),
+				DownloadURL:        buildDocumentDownloadURL(c, doc.ID),
+				Status:             status,
+				Decision:           decision,
+				ManualReviewReason: manualReviewReason,
+				ReviewReason:       reviewReason,
+				Reasoning:          reasoning,
+				Issues:             issues,
+				DetectedCategory:   detectedCategory,
 			})
 		}
 
