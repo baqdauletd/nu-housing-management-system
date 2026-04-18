@@ -1,6 +1,0 @@
-./application.go
-./document.go
-./document_analysis.go
-./log.go
-./stats.go
-./user.go
