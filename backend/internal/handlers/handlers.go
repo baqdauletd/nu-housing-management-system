@@ -201,6 +201,7 @@ func Login(db *sql.DB) gin.HandlerFunc {
 func SubmitApplication(db *sql.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var body struct {
+			FIO            string `json:"fio"`
 			Year           int    `json:"year" binding:"required"`
 			Major          string `json:"major" binding:"required"`
 			Gender         string `json:"gender" binding:"required"`
@@ -221,6 +222,7 @@ func SubmitApplication(db *sql.DB) gin.HandlerFunc {
 
 		app := models.Application{
 			StudentID:      studentID,
+			FIO:            strings.TrimSpace(body.FIO),
 			Year:           body.Year,
 			Major:          body.Major,
 			Gender:         body.Gender,
@@ -414,6 +416,7 @@ func analyzeAndApplyDecision(c *gin.Context, db *sql.DB, applicationID, document
 			StudentID:      app.StudentID,
 			StudentEmail:   user.Email,
 			StudentNuID:    user.NuID,
+			StudentFIO:     app.FIO,
 			Year:           app.Year,
 			Major:          app.Major,
 			Gender:         app.Gender,

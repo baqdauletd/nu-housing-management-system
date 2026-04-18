@@ -18,17 +18,18 @@ func UpsertDocumentAnalysis(db *sql.DB, result analysis.Result) error {
 
 	query := `
 		INSERT INTO document_extractions (
-			document_id, detected_doc_type, raw_text, confidence, model_name,
+			document_id, detected_doc_type, extracted_fio, raw_text, confidence, model_name,
 			requires_manual_review, contains_astana, registration_in_astana, workplace_in_astana, property_in_astana,
 			processing_status, extraction_error_type, extraction_error_message, warnings, city_mentions, created_at, updated_at
 		)
 		VALUES (
-			$1, $2, $3, $4, $5,
-			$6, $7, $8, $9, $10,
-			$11, $12, $13, $14, '[]'::jsonb, NOW(), NOW()
+			$1, $2, NULLIF($3, ''), $4, $5, $6,
+			$7, $8, $9, $10, $11,
+			$12, $13, $14, $15, '[]'::jsonb, NOW(), NOW()
 		)
 		ON CONFLICT (document_id) DO UPDATE SET
 			detected_doc_type = EXCLUDED.detected_doc_type,
+			extracted_fio = EXCLUDED.extracted_fio,
 			raw_text = EXCLUDED.raw_text,
 			confidence = EXCLUDED.confidence,
 			model_name = EXCLUDED.model_name,
@@ -57,6 +58,7 @@ func UpsertDocumentAnalysis(db *sql.DB, result analysis.Result) error {
 		query,
 		result.DocumentID,
 		result.DetectedCategory,
+		strings.ToValidUTF8(result.ExtractedFIO, ""),
 		strings.ToValidUTF8(result.ExtractedTextPreview, ""),
 		1.0,
 		"openai:"+result.ExpectedType,
@@ -88,6 +90,8 @@ func ListDocumentAnalysesByApplicationID(db *sql.DB, applicationID int) ([]model
 		       de.property_in_astana,
 		       de.registration_in_astana,
 		       de.workplace_in_astana,
+		       FALSE,
+		       COALESCE(de.extracted_fio, ''),
 		       COALESCE(de.warnings, '[]'::jsonb),
 		       COALESCE(
 		           NULLIF(de.extraction_error_message, ''),
@@ -145,6 +149,8 @@ func scanDocumentAnalysisRow(scanner rowScanner) (models.DocumentAnalysis, error
 		&analysisRow.HasAstanaProperty,
 		&analysisRow.HasAstanaResidence,
 		&analysisRow.HasAstanaEmployment,
+		&analysisRow.MatchedApplicantFIO,
+		&analysisRow.ExtractedFIO,
 		&issuesJSON,
 		&analysisRow.ReasoningSummary,
 		&analysisRow.ExtractedTextPreview,

@@ -42,6 +42,7 @@ type ApplicationContext struct {
 	StudentID      int
 	StudentEmail   string
 	StudentNuID    string
+	StudentFIO     string
 	Year           int
 	Major          string
 	Gender         string
@@ -67,6 +68,8 @@ type Result struct {
 	HasAstanaProperty    bool      `json:"has_astana_property"`
 	HasAstanaResidence   bool      `json:"has_astana_residence"`
 	HasAstanaEmployment  bool      `json:"has_astana_employment"`
+	MatchedApplicantFIO  bool      `json:"matched_applicant_fio"`
+	ExtractedFIO         string    `json:"extracted_fio"`
 	Issues               []string  `json:"issues"`
 	ReasoningSummary     string    `json:"reasoning_summary"`
 	ExtractedTextPreview string    `json:"extracted_text_preview"`
@@ -80,6 +83,8 @@ type aiResponse struct {
 	HasAstanaResidence   bool     `json:"has_astana_residence"`
 	HasAstanaEmployment  bool     `json:"has_astana_employment"`
 	ContainsRelevantInfo bool     `json:"contains_relevant_info"`
+	MatchedApplicantFIO  bool     `json:"matched_applicant_fio"`
+	ExtractedFIO         string   `json:"extracted_fio"`
 	Status               string   `json:"status"`
 	Issues               []string `json:"issues"`
 	ReasoningSummary     string   `json:"reasoning_summary"`
@@ -100,6 +105,15 @@ func ExpectedCategory(docType DocumentType) Category {
 		return CategoryWork
 	default:
 		return CategoryUnknown
+	}
+}
+
+func RequiresApplicantNameMatch(docType DocumentType) bool {
+	switch docType {
+	case DocumentTypePropertySelf, DocumentTypeResidenceSelf:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -243,6 +257,24 @@ func PostProcessResult(req Request, extractedText string, aiResult aiResponse, r
 		}
 	}
 
+	if RequiresApplicantNameMatch(req.ExpectedType) {
+		appFIO := NormalizeExtractedText(req.Application.StudentFIO)
+		extractedFIO := NormalizeExtractedText(aiResult.ExtractedFIO)
+		if appFIO == "" {
+			status = StatusManualReview
+			issues = append(issues, "missing_application_fio")
+			reasoning = "Manual review required because the application FIO is missing and the self-document name cannot be compared."
+		} else if extractedFIO == "" {
+			status = StatusManualReview
+			issues = append(issues, "missing_document_fio")
+			reasoning = "Manual review required because the self-document does not contain a clear Cyrillic FIO to compare with the application."
+		} else if !aiResult.MatchedApplicantFIO {
+			status = StatusFailed
+			issues = append(issues, "applicant_name_mismatch")
+			reasoning = "The Cyrillic FIO in the applicant's own document does not match the FIO in the application."
+		}
+	}
+
 	return Result{
 		DocumentID:           req.DocumentID,
 		ApplicationID:        req.Application.ApplicationID,
@@ -252,6 +284,8 @@ func PostProcessResult(req Request, extractedText string, aiResult aiResponse, r
 		HasAstanaProperty:    aiResult.HasAstanaProperty,
 		HasAstanaResidence:   aiResult.HasAstanaResidence,
 		HasAstanaEmployment:  aiResult.HasAstanaEmployment,
+		MatchedApplicantFIO:  aiResult.MatchedApplicantFIO,
+		ExtractedFIO:         NormalizeExtractedText(aiResult.ExtractedFIO),
 		Issues:               uniqueIssues(issues),
 		ReasoningSummary:     reasoning,
 		ExtractedTextPreview: preview,
@@ -266,6 +300,8 @@ func analysisSystemPrompt() string {
 		"Return strict JSON only that matches the required schema.",
 		"Use the uploaded PDF file, any extracted PDF text, and the provided application data.",
 		"Detect whether the document contains evidence of property in Astana, residence in Astana, or work in Astana.",
+		"Only for the applicant's own documents, compare the Cyrillic FIO in the document against the application's FIO field.",
+		"Do not compare names in parents' documents because there is nothing reliable to compare them to.",
 		"If the document clearly refers to another city such as Shymkent, Almaty, Karaganda, or any city other than Astana, that is acceptable and should not be treated as a failure.",
 		"Reject only when the document indicates Astana specifically, not just any city in Kazakhstan.",
 		"If extracted text is empty because the PDF is scanned, inspect the PDF pages themselves before deciding manual_review.",
@@ -284,6 +320,7 @@ func analysisPayload(req Request, extractedText string) map[string]any {
 			"student_id":      req.Application.StudentID,
 			"student_email":   req.Application.StudentEmail,
 			"student_nu_id":   req.Application.StudentNuID,
+			"student_fio":     req.Application.StudentFIO,
 			"year":            req.Application.Year,
 			"major":           req.Application.Major,
 			"gender":          req.Application.Gender,
@@ -309,6 +346,8 @@ func analysisJSONSchema() map[string]any {
 			"has_astana_residence":   map[string]any{"type": "boolean"},
 			"has_astana_employment":  map[string]any{"type": "boolean"},
 			"contains_relevant_info": map[string]any{"type": "boolean"},
+			"matched_applicant_fio":  map[string]any{"type": "boolean"},
+			"extracted_fio":          map[string]any{"type": "string"},
 			"status": map[string]any{
 				"type": "string",
 				"enum": []string{"passed", "failed", "manual_review"},
@@ -326,6 +365,8 @@ func analysisJSONSchema() map[string]any {
 			"has_astana_residence",
 			"has_astana_employment",
 			"contains_relevant_info",
+			"matched_applicant_fio",
+			"extracted_fio",
 			"status",
 			"issues",
 			"reasoning_summary",

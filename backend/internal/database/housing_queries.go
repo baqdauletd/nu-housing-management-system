@@ -7,7 +7,7 @@ import (
 
 func HousingListApplications(db *sql.DB) ([]models.Application, error) {
 	query := `
-      SELECT id, student_id, year, major, gender, COALESCE(room_preference, ''), COALESCE(additional_info, ''),
+      SELECT id, student_id, COALESCE(fio, ''), year, major, gender, COALESCE(room_preference, ''), COALESCE(additional_info, ''),
              status, submitted_at, updated_at, rejected_reason, reviewed_by, review_timestamp
       FROM applications
       ORDER BY submitted_at DESC
@@ -26,6 +26,7 @@ func HousingListApplications(db *sql.DB) ([]models.Application, error) {
 		if err := rows.Scan(
 			&a.ID,
 			&a.StudentID,
+			&a.FIO,
 			&a.Year,
 			&a.Major,
 			&a.Gender,

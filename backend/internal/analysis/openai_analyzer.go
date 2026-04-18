@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-const defaultOpenAIModel = "gpt-4o-mini"
+const defaultOpenAIModel = "gpt-5.4"
 
 type OpenAIAnalyzer struct {
 	apiKey     string

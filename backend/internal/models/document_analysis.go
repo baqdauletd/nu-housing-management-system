@@ -12,6 +12,8 @@ type DocumentAnalysis struct {
 	HasAstanaProperty    bool      `json:"has_astana_property"`
 	HasAstanaResidence   bool      `json:"has_astana_residence"`
 	HasAstanaEmployment  bool      `json:"has_astana_employment"`
+	MatchedApplicantFIO  bool      `json:"matched_applicant_fio"`
+	ExtractedFIO         string    `json:"extracted_fio"`
 	Issues               []string  `json:"issues"`
 	ReasoningSummary     string    `json:"reasoning_summary"`
 	ExtractedTextPreview string    `json:"extracted_text_preview"`

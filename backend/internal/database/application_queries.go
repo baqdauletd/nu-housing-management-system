@@ -9,12 +9,12 @@ import (
 func SubmitApplication(db *sql.DB, a models.Application) (int, error) {
 	query := `
 		INSERT INTO applications
-		(student_id, year, major, gender, room_preference, additional_info, status, submitted_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, 'pending', NOW(), NOW())
+		(student_id, fio, year, major, gender, room_preference, additional_info, status, submitted_at, updated_at)
+		VALUES ($1, NULLIF($2, ''), $3, $4, $5, $6, $7, 'pending', NOW(), NOW())
 		RETURNING id
 	`
 	var id int
-	err := db.QueryRow(query, a.StudentID, a.Year, a.Major, a.Gender, a.RoomPreference, a.AdditionalInfo).Scan(&id)
+	err := db.QueryRow(query, a.StudentID, a.FIO, a.Year, a.Major, a.Gender, a.RoomPreference, a.AdditionalInfo).Scan(&id)
 	if err != nil {
 		return 0, err
 	}
@@ -26,7 +26,7 @@ func GetApplicationByID(db *sql.DB, id int) (models.Application, error) {
 	var a models.Application
 
 	query := `
-		SELECT id, student_id, year, major, gender, COALESCE(room_preference, ''), COALESCE(additional_info, ''),
+		SELECT id, student_id, COALESCE(fio, ''), year, major, gender, COALESCE(room_preference, ''), COALESCE(additional_info, ''),
 		       status, submitted_at, updated_at, rejected_reason, reviewed_by, review_timestamp
 		FROM applications
 		WHERE id = $1
@@ -35,6 +35,7 @@ func GetApplicationByID(db *sql.DB, id int) (models.Application, error) {
 	err := db.QueryRow(query, id).Scan(
 		&a.ID,
 		&a.StudentID,
+		&a.FIO,
 		&a.Year,
 		&a.Major,
 		&a.Gender,
@@ -57,7 +58,7 @@ func GetApplicationByID(db *sql.DB, id int) (models.Application, error) {
 
 func GetApplicationsByStudent(db *sql.DB, studentID int) ([]models.Application, error) {
 	query := `
-		SELECT id, student_id, year, major, gender, COALESCE(room_preference, ''), COALESCE(additional_info, ''),
+		SELECT id, student_id, COALESCE(fio, ''), year, major, gender, COALESCE(room_preference, ''), COALESCE(additional_info, ''),
 		       status, submitted_at, updated_at, rejected_reason, reviewed_by, review_timestamp
 		FROM applications
 		WHERE student_id = $1
@@ -76,6 +77,7 @@ func GetApplicationsByStudent(db *sql.DB, studentID int) ([]models.Application, 
 		if err := rows.Scan(
 			&a.ID,
 			&a.StudentID,
+			&a.FIO,
 			&a.Year,
 			&a.Major,
 			&a.Gender,
