@@ -15,7 +15,8 @@ services:
 
   backend:
     build:
-      context: ./backend
+      context: .
+      dockerfile: Dockerfile
     container_name: backend_nu_housing
     restart: unless-stopped
     depends_on:

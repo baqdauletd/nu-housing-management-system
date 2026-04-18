@@ -1,4 +1,4 @@
-module nu-housing-management-system/backend
+module nu-housing-management-system
 
 go 1.25.4
 

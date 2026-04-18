@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/spf13/viper"
@@ -30,7 +31,7 @@ func LoadConfig() (*Config, error) {
 	if err := viper.ReadInConfig(); err != nil {
 		// Allow startup without a .env file when the process environment already
 		// provides the required variables.
-		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
+		if _, ok := err.(viper.ConfigFileNotFoundError); !ok && !os.IsNotExist(err) {
 			return nil, fmt.Errorf("read config file: %w", err)
 		}
 	}

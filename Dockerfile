@@ -24,7 +24,7 @@ RUN go mod download
 COPY . .
 
 # Build the backend binary
-RUN go build -o server ./cmd/server/main.go
+RUN go build -o server ./backend/cmd/server/main.go
 
 
 # ============================
@@ -40,9 +40,6 @@ WORKDIR /app
 
 # Copy binary from builder stage
 COPY --from=builder /app/server .
-
-# environment file if needed (optional)
-COPY .env .env
 
 EXPOSE 8080
 CMD ["./server"]
