@@ -23,12 +23,60 @@ func SubmitApplication(db *sql.DB, a models.Application) (int, error) {
 		RETURNING id
 	`
 	var id int
-	err = db.QueryRow(query, a.StudentID, a.Year, a.Major, a.Gender, a.RoomPreference, a.AdditionalInfo).Scan(&id)
+	err = db.QueryRow(query, a.StudentID, a.FIO, a.Year, a.Major, a.Gender, a.RoomPreference, a.AdditionalInfo).Scan(&id)
 	if err != nil {
 		return 0, err
 	}
 	db.Exec(`INSERT INTO audit_logs (actor_id, action, entity, entity_id) VALUES ($1, 'submit', 'application', $2)`, a.StudentID, id)
 	return id, nil
+}
+
+func UpdateStudentApplicationDetails(db *sql.DB, studentID int, a models.Application) (models.Application, error) {
+	query := `
+		UPDATE applications
+		SET room_preference = $1,
+		    additional_info = $2,
+		    updated_at = NOW()
+		WHERE id = $3
+		  AND student_id = $4
+		RETURNING id, student_id, COALESCE(fio, ''), year, major, gender, COALESCE(room_preference, ''), COALESCE(additional_info, ''),
+		          status, submitted_at, updated_at, rejected_reason, reviewed_by, review_timestamp
+	`
+
+	var updated models.Application
+	err := db.QueryRow(
+		query,
+		a.RoomPreference,
+		a.AdditionalInfo,
+		a.ID,
+		studentID,
+	).Scan(
+		&updated.ID,
+		&updated.StudentID,
+		&updated.FIO,
+		&updated.Year,
+		&updated.Major,
+		&updated.Gender,
+		&updated.RoomPreference,
+		&updated.AdditionalInfo,
+		&updated.Status,
+		&updated.SubmittedAt,
+		&updated.UpdatedAt,
+		&updated.RejectedReason,
+		&updated.ReviewedBy,
+		&updated.ReviewTimestamp,
+	)
+	if err == sql.ErrNoRows {
+		return updated, errors.New("application not found")
+	}
+	if err != nil {
+		return updated, err
+	}
+
+	normalizeApplicationFIO(&updated)
+	updated.DecisionReason = updated.RejectedReason
+	db.Exec(`INSERT INTO audit_logs (actor_id, action, entity, entity_id) VALUES ($1, 'update', 'application', $2)`, studentID, updated.ID)
+	return updated, nil
 }
 
 func GetApplicationByID(db *sql.DB, id int) (models.Application, error) {

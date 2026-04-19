@@ -28,6 +28,7 @@ func RegisterRoutes(
 	{
 		application.POST("/submit", handlers.SubmitApplication(db))
 		application.GET("/my", handlers.GetMyApplications(db))
+		application.PATCH("/:id", handlers.UpdateMyApplication(db))
 		application.GET("/:id/status", handlers.GetApplicationStatus(db))
 	}
 

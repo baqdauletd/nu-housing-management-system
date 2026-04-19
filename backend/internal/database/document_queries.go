@@ -10,7 +10,40 @@ import (
 // DOCUMENT QUERIES (UPDATED)
 ////////////////////////////////////////////////////////////
 
-func InsertDocument(db *sql.DB, doc models.Document) (int, error) {
+func SaveDocumentReplacingType(db *sql.DB, doc models.Document) (int, error) {
+	updateQuery := `
+		UPDATE documents
+		SET file_url = $1,
+		    original_filename = $2,
+		    content_type = $3,
+		    uploaded_at = NOW()
+		WHERE id = (
+			SELECT id
+			FROM documents
+			WHERE application_id = $4
+			  AND type = $5
+			ORDER BY uploaded_at DESC, id DESC
+			LIMIT 1
+		)
+		RETURNING id
+	`
+
+	var id int
+	err := db.QueryRow(
+		updateQuery,
+		doc.FileURL,
+		doc.OriginalFilename,
+		doc.ContentType,
+		doc.ApplicationID,
+		doc.Type,
+	).Scan(&id)
+	if err == nil {
+		return id, nil
+	}
+	if err != sql.ErrNoRows {
+		return 0, err
+	}
+
 	query := `
 		INSERT INTO documents (
 			application_id,
@@ -23,8 +56,7 @@ func InsertDocument(db *sql.DB, doc models.Document) (int, error) {
 		VALUES ($1, $2, $3, $4, $5, NOW())
 		RETURNING id
 	`
-	var id int
-	err := db.QueryRow(
+	err = db.QueryRow(
 		query,
 		doc.ApplicationID,
 		doc.Type,
@@ -65,9 +97,10 @@ func GetDocument(db *sql.DB, id int) (models.Document, error) {
 
 func GetDocumentsByApplication(db *sql.DB, appID int) ([]models.Document, error) {
 	query := `
-		SELECT id, application_id, type, file_url, original_filename, content_type, uploaded_at
+		SELECT DISTINCT ON (type) id, application_id, type, file_url, original_filename, content_type, uploaded_at
 		FROM documents
 		WHERE application_id = $1
+		ORDER BY type, uploaded_at DESC, id DESC
 	`
 
 	rows, err := db.Query(query, appID)

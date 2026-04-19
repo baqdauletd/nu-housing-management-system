@@ -292,6 +292,69 @@ func GetMyApplications(db *sql.DB) gin.HandlerFunc {
 	}
 }
 
+func UpdateMyApplication(db *sql.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id, err := strconv.Atoi(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid application id"})
+			return
+		}
+
+		var body struct {
+			ApartmentInAstana   *bool   `json:"apartment_in_astana"`
+			ParentsWorkInAstana *bool   `json:"parents_work_in_astana"`
+			AstanaResident      *bool   `json:"astana_resident"`
+			PreferredRoommate   *string `json:"preferred_roommate"`
+		}
+		if err := c.ShouldBindJSON(&body); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid input", "details": err.Error()})
+			return
+		}
+
+		uid, ok := c.Get("user_id")
+		if !ok {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "user_id missing in token"})
+			return
+		}
+		studentID := uid.(int)
+
+		app, err := database.GetApplicationByID(db, id)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "application not found"})
+			return
+		}
+		if app.StudentID != studentID {
+			c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
+			return
+		}
+
+		app.AdditionalInfo = mergeEditableApplicationDetails(
+			app.AdditionalInfo,
+			body.ApartmentInAstana,
+			body.ParentsWorkInAstana,
+			body.AstanaResident,
+			body.PreferredRoommate,
+		)
+
+		updated, err := database.UpdateStudentApplicationDetails(db, studentID, app)
+		if err != nil {
+			if err.Error() == "application not found" {
+				c.JSON(http.StatusNotFound, gin.H{"error": "application not found"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update application", "details": err.Error()})
+			return
+		}
+
+		payload, err := buildApplicationReviewPayload(db, updated)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch application review details", "details": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, payload)
+	}
+}
+
 func GetApplicationStatus(db *sql.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		idStr := c.Param("id")
@@ -465,7 +528,7 @@ func UploadDocument(db *sql.DB, minioStore *database.MinIOStore) gin.HandlerFunc
 			OriginalFilename: &originalFilename,
 			ContentType:      &contentType,
 		}
-		id, err := database.InsertDocument(db, doc)
+		id, err := database.SaveDocumentReplacingType(db, doc)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save document into db", "details": err.Error()})
 			return
@@ -971,7 +1034,84 @@ func buildApplicationReviewPayload(db *sql.DB, app models.Application) (gin.H, e
 		"manual_review_reasons": manualReviewReasons,
 		"review_reasons":        reviewReasons,
 		"problematic_documents": problematicDocuments,
+		"editable_details":      extractEditableApplicationDetails(app.AdditionalInfo),
 	}, nil
+}
+
+func mergeEditableApplicationDetails(additionalInfo string, apartmentInAstana, parentsWorkInAstana, astanaResident *bool, preferredRoommate *string) string {
+	managedKeys := map[string]bool{
+		"apartment_in_astana":    true,
+		"parents_work_in_astana": true,
+		"astana_resident":        true,
+		"preferred_roommate":     true,
+	}
+
+	lines := make([]string, 0)
+	for _, line := range strings.Split(additionalInfo, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		key, _, ok := strings.Cut(trimmed, ":")
+		if ok && managedKeys[strings.ToLower(strings.TrimSpace(key))] {
+			continue
+		}
+		lines = append(lines, trimmed)
+	}
+
+	if apartmentInAstana != nil {
+		lines = append(lines, fmt.Sprintf("apartment_in_astana: %t", *apartmentInAstana))
+	}
+	if parentsWorkInAstana != nil {
+		lines = append(lines, fmt.Sprintf("parents_work_in_astana: %t", *parentsWorkInAstana))
+	}
+	if astanaResident != nil {
+		lines = append(lines, fmt.Sprintf("astana_resident: %t", *astanaResident))
+	}
+	if preferredRoommate != nil {
+		lines = append(lines, "preferred_roommate: "+strings.TrimSpace(*preferredRoommate))
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+func extractEditableApplicationDetails(additionalInfo string) gin.H {
+	details := gin.H{
+		"apartment_in_astana":    nil,
+		"parents_work_in_astana": nil,
+		"astana_resident":        nil,
+		"preferred_roommate":     "",
+	}
+
+	for _, line := range strings.Split(additionalInfo, "\n") {
+		key, value, ok := strings.Cut(line, ":")
+		if !ok {
+			continue
+		}
+		key = strings.ToLower(strings.TrimSpace(key))
+		value = strings.TrimSpace(value)
+		switch key {
+		case "apartment_in_astana", "parents_work_in_astana", "astana_resident":
+			if parsed, ok := parseBoolDetail(value); ok {
+				details[key] = parsed
+			}
+		case "preferred_roommate":
+			details[key] = value
+		}
+	}
+
+	return details
+}
+
+func parseBoolDetail(value string) (bool, bool) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "true", "yes", "1":
+		return true, true
+	case "false", "no", "0":
+		return false, true
+	default:
+		return false, false
+	}
 }
 
 func authorizeApplicationAccess(c *gin.Context, db *sql.DB, applicationID int) bool {
