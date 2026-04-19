@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"database/sql"
 	"fmt"
@@ -268,25 +269,9 @@ func GetMyApplications(db *sql.DB) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch applications", "details": err.Error()})
 			return
 		}
-		for i := range apps {
-			if err := database.ApplyAutomatedDecision(db, apps[i].ID); err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to refresh application status", "details": err.Error()})
-				return
-			}
-		}
-		apps, err = database.GetApplicationsByStudent(db, studentID)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch refreshed applications", "details": err.Error()})
-			return
-		}
 		response := make([]gin.H, 0, len(apps))
 		for _, app := range apps {
-			payload, err := buildApplicationReviewPayload(db, app)
-			if err != nil {
-				response = append(response, buildBasicApplicationPayload(app, err.Error()))
-				continue
-			}
-			response = append(response, payload)
+			response = append(response, buildBasicApplicationPayload(app, ""))
 		}
 		c.JSON(http.StatusOK, response)
 	}
@@ -534,15 +519,21 @@ func UploadDocument(db *sql.DB, minioStore *database.MinIOStore) gin.HandlerFunc
 			return
 		}
 
-		if err := analyzeAndApplyDecision(c, db, applicationID, id, docType, pdfBytes); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to analyze uploaded document", "details": err.Error()})
-			return
-		}
+		go processUploadedDocumentAsync(db, applicationID, id, docType, append([]byte(nil), pdfBytes...))
 		c.JSON(http.StatusCreated, gin.H{"document_id": id})
 	}
 }
 
-func analyzeAndApplyDecision(c *gin.Context, db *sql.DB, applicationID, documentID int, docType string, pdfBytes []byte) error {
+func processUploadedDocumentAsync(db *sql.DB, applicationID, documentID int, docType string, pdfBytes []byte) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+
+	if err := analyzeAndApplyDecision(ctx, db, applicationID, documentID, docType, pdfBytes); err != nil {
+		fmt.Printf("background document analysis failed for application %d document %d: %v\n", applicationID, documentID, err)
+	}
+}
+
+func analyzeAndApplyDecision(ctx context.Context, db *sql.DB, applicationID, documentID int, docType string, pdfBytes []byte) error {
 	expectedType, ok := analysis.NormalizeDocumentType(docType)
 	if !ok {
 		result := analysis.ManualReviewResult(
@@ -592,7 +583,7 @@ func analyzeAndApplyDecision(c *gin.Context, db *sql.DB, applicationID, document
 		},
 	}
 
-	result, analyzeErr := analyzer.AnalyzeDocument(c, req)
+	result, analyzeErr := analyzer.AnalyzeDocument(ctx, req)
 	if err := database.UpsertDocumentAnalysis(db, result); err != nil {
 		return err
 	}
