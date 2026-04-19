@@ -18,12 +18,12 @@ func SubmitApplication(db *sql.DB, a models.Application) (int, error) {
 
 	query := `
 		INSERT INTO applications
-		(student_id, fio, year, major, gender, room_preference, additional_info, status, submitted_at, updated_at)
-		VALUES ($1, NULLIF($2, ''), $3, $4, $5, $6, $7, 'pending', NOW(), NOW())
+		(student_id, applicant_type, fio, passport_number, year, major, gender, room_preference, additional_info, status, submitted_at, updated_at)
+		VALUES ($1, NULLIF($2, ''), NULLIF($3, ''), NULLIF($4, ''), $5, $6, $7, $8, $9, 'pending', NOW(), NOW())
 		RETURNING id
 	`
 	var id int
-	err = db.QueryRow(query, a.StudentID, a.FIO, a.Year, a.Major, a.Gender, a.RoomPreference, a.AdditionalInfo).Scan(&id)
+	err = db.QueryRow(query, a.StudentID, a.ApplicantType, a.FIO, a.PassportNumber, a.Year, a.Major, a.Gender, a.RoomPreference, a.AdditionalInfo).Scan(&id)
 	if err != nil {
 		return 0, err
 	}
@@ -40,7 +40,7 @@ func UpdateStudentApplicationDetails(db *sql.DB, studentID int, a models.Applica
 		WHERE id = $3
 		  AND student_id = $4
 		RETURNING id, student_id, COALESCE(fio, ''), year, major, gender, COALESCE(room_preference, ''), COALESCE(additional_info, ''),
-		          status, submitted_at, updated_at, rejected_reason, reviewed_by, review_timestamp
+		          COALESCE(applicant_type, 'local'), COALESCE(passport_number, ''), status, submitted_at, updated_at, rejected_reason, reviewed_by, review_timestamp
 	`
 
 	var updated models.Application
@@ -59,6 +59,8 @@ func UpdateStudentApplicationDetails(db *sql.DB, studentID int, a models.Applica
 		&updated.Gender,
 		&updated.RoomPreference,
 		&updated.AdditionalInfo,
+		&updated.ApplicantType,
+		&updated.PassportNumber,
 		&updated.Status,
 		&updated.SubmittedAt,
 		&updated.UpdatedAt,
@@ -84,7 +86,7 @@ func GetApplicationByID(db *sql.DB, id int) (models.Application, error) {
 
 	query := `
 		SELECT id, student_id, COALESCE(fio, ''), year, major, gender, COALESCE(room_preference, ''), COALESCE(additional_info, ''),
-		       status, submitted_at, updated_at, rejected_reason, reviewed_by, review_timestamp
+		       COALESCE(applicant_type, 'local'), COALESCE(passport_number, ''), status, submitted_at, updated_at, rejected_reason, reviewed_by, review_timestamp
 		FROM applications
 		WHERE id = $1
 	`
@@ -98,6 +100,8 @@ func GetApplicationByID(db *sql.DB, id int) (models.Application, error) {
 		&a.Gender,
 		&a.RoomPreference,
 		&a.AdditionalInfo,
+		&a.ApplicantType,
+		&a.PassportNumber,
 		&a.Status,
 		&a.SubmittedAt,
 		&a.UpdatedAt,
@@ -117,7 +121,7 @@ func GetApplicationByID(db *sql.DB, id int) (models.Application, error) {
 func GetApplicationsByStudent(db *sql.DB, studentID int) ([]models.Application, error) {
 	query := `
 		SELECT id, student_id, COALESCE(fio, ''), year, major, gender, COALESCE(room_preference, ''), COALESCE(additional_info, ''),
-		       status, submitted_at, updated_at, rejected_reason, reviewed_by, review_timestamp
+		       COALESCE(applicant_type, 'local'), COALESCE(passport_number, ''), status, submitted_at, updated_at, rejected_reason, reviewed_by, review_timestamp
 		FROM applications
 		WHERE student_id = $1
 		ORDER BY submitted_at DESC
@@ -141,6 +145,8 @@ func GetApplicationsByStudent(db *sql.DB, studentID int) ([]models.Application, 
 			&a.Gender,
 			&a.RoomPreference,
 			&a.AdditionalInfo,
+			&a.ApplicantType,
+			&a.PassportNumber,
 			&a.Status,
 			&a.SubmittedAt,
 			&a.UpdatedAt,

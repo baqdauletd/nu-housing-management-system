@@ -5,7 +5,9 @@ import "time"
 type Application struct {
 	ID              int        `json:"id"`
 	StudentID       int        `json:"student_id"`
+	ApplicantType   string     `json:"applicant_type,omitempty"`
 	FIO             string     `json:"fio,omitempty"`
+	PassportNumber  string     `json:"passport_number,omitempty"`
 	Year            int        `json:"year"`
 	Major           string     `json:"major"`
 	Gender          string     `json:"gender"`

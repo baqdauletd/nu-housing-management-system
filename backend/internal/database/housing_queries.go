@@ -18,7 +18,7 @@ type HousingApplicationFilters struct {
 func HousingListApplications(db *sql.DB, filters HousingApplicationFilters) ([]models.Application, error) {
 	baseQuery := `
       SELECT id, student_id, COALESCE(fio, ''), year, major, gender, COALESCE(room_preference, ''), COALESCE(additional_info, ''),
-             status, submitted_at, updated_at, rejected_reason, reviewed_by, review_timestamp
+             COALESCE(applicant_type, 'local'), COALESCE(passport_number, ''), status, submitted_at, updated_at, rejected_reason, reviewed_by, review_timestamp
       FROM applications
    `
 
@@ -87,6 +87,8 @@ func HousingListApplications(db *sql.DB, filters HousingApplicationFilters) ([]m
 			&a.Gender,
 			&a.RoomPreference,
 			&a.AdditionalInfo,
+			&a.ApplicantType,
+			&a.PassportNumber,
 			&a.Status,
 			&a.SubmittedAt,
 			&a.UpdatedAt,
@@ -96,6 +98,7 @@ func HousingListApplications(db *sql.DB, filters HousingApplicationFilters) ([]m
 		); err != nil {
 			return nil, err
 		}
+		normalizeApplicationIdentity(&a)
 		apps = append(apps, a)
 	}
 

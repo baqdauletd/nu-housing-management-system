@@ -49,6 +49,8 @@ func UpsertDocumentAnalysis(db *sql.DB, result analysis.Result) error {
 	processingStatus := "completed"
 	if result.Status == string(analysis.StatusManualReview) {
 		processingStatus = "manual_review"
+	} else if result.Status == string(analysis.StatusFailed) {
+		processingStatus = "failed"
 	}
 	errorType := ""
 	if len(result.Issues) > 0 {
@@ -84,6 +86,7 @@ func ListDocumentAnalysesByApplicationID(db *sql.DB, applicationID int) ([]model
 		       d.type,
 		       COALESCE(NULLIF(de.detected_doc_type, ''), 'unknown'),
 		       CASE
+		           WHEN de.processing_status = 'failed' THEN 'failed'
 		           WHEN de.property_in_astana OR de.registration_in_astana OR de.workplace_in_astana THEN 'failed'
 		           WHEN de.processing_status <> 'completed' OR de.requires_manual_review THEN 'manual_review'
 		           ELSE 'passed'
@@ -97,6 +100,7 @@ func ListDocumentAnalysesByApplicationID(db *sql.DB, applicationID int) ([]model
 		       COALESCE(
 		           NULLIF(de.extraction_error_message, ''),
 		           CASE
+		               WHEN de.processing_status = 'failed' THEN 'The document failed automated verification.'
 		               WHEN de.property_in_astana THEN 'The document indicates real estate ownership in Astana.'
 		               WHEN de.registration_in_astana THEN 'The document indicates residence registration in Astana.'
 		               WHEN de.workplace_in_astana THEN 'The document indicates employment in Astana.'

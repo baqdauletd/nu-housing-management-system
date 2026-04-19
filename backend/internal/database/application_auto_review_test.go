@@ -40,6 +40,36 @@ func TestDetermineAutomatedDecisionApprovesWhenAllRequiredDocsPass(t *testing.T)
 	}
 }
 
+func TestDetermineAutomatedDecisionApprovesInternationalApplicantWithPassport(t *testing.T) {
+	decision := DetermineAutomatedDecision(models.Application{ApplicantType: "international"}, []models.DocumentAnalysis{
+		{
+			DocumentID:       1,
+			ExpectedType:     string(analysis.DocumentTypePassport),
+			Status:           string(analysis.StatusPassed),
+			ReasoningSummary: "ok",
+			AnalyzedAt:       time.Now().UTC(),
+		},
+	})
+	if decision.Status != "approved" {
+		t.Fatalf("status = %q, want approved", decision.Status)
+	}
+}
+
+func TestDetermineAutomatedDecisionRejectsInternationalApplicantOnFailedPassport(t *testing.T) {
+	decision := DetermineAutomatedDecision(models.Application{ApplicantType: "international"}, []models.DocumentAnalysis{
+		{
+			DocumentID:       1,
+			ExpectedType:     string(analysis.DocumentTypePassport),
+			Status:           string(analysis.StatusFailed),
+			ReasoningSummary: "Kazakhstan citizenship detected.",
+			AnalyzedAt:       time.Now().UTC(),
+		},
+	})
+	if decision.Status != "rejected" {
+		t.Fatalf("status = %q, want rejected", decision.Status)
+	}
+}
+
 func buildAnalyses(status string, reason string) []models.DocumentAnalysis {
 	now := time.Now().UTC()
 	types := []string{

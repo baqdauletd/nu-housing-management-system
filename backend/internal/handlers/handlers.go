@@ -202,7 +202,9 @@ func Login(db *sql.DB) gin.HandlerFunc {
 func SubmitApplication(db *sql.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var body struct {
+			ApplicantType  string `json:"applicant_type"`
 			FIO            string `json:"fio"`
+			PassportNumber string `json:"passport_number"`
 			Year           int    `json:"year" binding:"required"`
 			Major          string `json:"major" binding:"required"`
 			Gender         string `json:"gender" binding:"required"`
@@ -238,12 +240,20 @@ func SubmitApplication(db *sql.DB) gin.HandlerFunc {
 
 		app := models.Application{
 			StudentID:      studentID,
+			ApplicantType:  database.NormalizeApplicantTypeForSubmission(body.ApplicantType, body.AdditionalInfo),
 			FIO:            strings.TrimSpace(body.FIO),
+			PassportNumber: strings.TrimSpace(body.PassportNumber),
 			Year:           body.Year,
 			Major:          body.Major,
 			Gender:         body.Gender,
 			RoomPreference: body.RoomPreference,
 			AdditionalInfo: body.AdditionalInfo,
+		}
+		if app.FIO == "" {
+			app.FIO = database.ExtractFIOForSubmission(body.AdditionalInfo)
+		}
+		if app.PassportNumber == "" {
+			app.PassportNumber = database.ExtractPassportNumberForSubmission(body.AdditionalInfo)
 		}
 
 		id, err := database.SubmitApplication(db, app)
@@ -572,7 +582,9 @@ func analyzeAndApplyDecision(ctx context.Context, db *sql.DB, applicationID, doc
 			StudentID:      app.StudentID,
 			StudentEmail:   user.Email,
 			StudentNuID:    user.NuID,
+			ApplicantType:  app.ApplicantType,
 			StudentFIO:     app.FIO,
+			PassportNumber: app.PassportNumber,
 			Year:           app.Year,
 			Major:          app.Major,
 			Gender:         app.Gender,
@@ -1004,7 +1016,9 @@ func buildApplicationReviewPayload(db *sql.DB, app models.Application) (gin.H, e
 	return gin.H{
 		"id":                    app.ID,
 		"student_id":            app.StudentID,
+		"applicant_type":        app.ApplicantType,
 		"fio":                   app.FIO,
+		"passport_number":       app.PassportNumber,
 		"year":                  app.Year,
 		"major":                 app.Major,
 		"gender":                app.Gender,
@@ -1025,10 +1039,20 @@ func buildApplicationReviewPayload(db *sql.DB, app models.Application) (gin.H, e
 }
 
 func buildBasicApplicationPayload(app models.Application, reviewDetailsError string) gin.H {
+	manualReviewReasons := []string{}
+	reviewReasons := []string{}
+	if app.DecisionReason != nil && strings.TrimSpace(*app.DecisionReason) != "" {
+		reviewReasons = append(reviewReasons, strings.TrimSpace(*app.DecisionReason))
+		if strings.EqualFold(strings.TrimSpace(app.Status), "pending") {
+			manualReviewReasons = append(manualReviewReasons, strings.TrimSpace(*app.DecisionReason))
+		}
+	}
 	return gin.H{
 		"id":                    app.ID,
 		"student_id":            app.StudentID,
+		"applicant_type":        app.ApplicantType,
 		"fio":                   app.FIO,
+		"passport_number":       app.PassportNumber,
 		"year":                  app.Year,
 		"major":                 app.Major,
 		"gender":                app.Gender,
@@ -1041,8 +1065,8 @@ func buildBasicApplicationPayload(app models.Application, reviewDetailsError str
 		"decision_reason":       app.DecisionReason,
 		"reviewed_by":           app.ReviewedBy,
 		"review_timestamp":      app.ReviewTimestamp,
-		"manual_review_reasons": []string{},
-		"review_reasons":        []string{},
+		"manual_review_reasons": manualReviewReasons,
+		"review_reasons":        reviewReasons,
 		"problematic_documents": []gin.H{},
 		"editable_details":      extractEditableApplicationDetails(app.AdditionalInfo),
 		"review_details_error":  reviewDetailsError,

@@ -25,6 +25,10 @@ var requiredAutomatedDocumentTypes = []string{
 	string(analysis.DocumentTypeWorkFather),
 }
 
+var requiredInternationalDocumentTypes = []string{
+	string(analysis.DocumentTypePassport),
+}
+
 func DetermineAutomatedDecision(app models.Application, analyses []models.DocumentAnalysis) AutomatedDecision {
 	if app.ReviewedBy != nil {
 		return AutomatedDecision{}
@@ -44,7 +48,12 @@ func DetermineAutomatedDecision(app models.Application, analyses []models.Docume
 		}
 	}
 
-	for _, requiredType := range requiredAutomatedDocumentTypes {
+	requiredTypes := requiredAutomatedDocumentTypes
+	if strings.EqualFold(strings.TrimSpace(app.ApplicantType), "international") {
+		requiredTypes = requiredInternationalDocumentTypes
+	}
+
+	for _, requiredType := range requiredTypes {
 		docAnalysis, ok := latestByType[requiredType]
 		if !ok {
 			continue
@@ -55,8 +64,8 @@ func DetermineAutomatedDecision(app models.Application, analyses []models.Docume
 		}
 	}
 
-	missing := make([]string, 0, len(requiredAutomatedDocumentTypes))
-	for _, requiredType := range requiredAutomatedDocumentTypes {
+	missing := make([]string, 0, len(requiredTypes))
+	for _, requiredType := range requiredTypes {
 		if _, ok := latestByType[requiredType]; !ok {
 			missing = append(missing, requiredType)
 		}
@@ -68,7 +77,7 @@ func DetermineAutomatedDecision(app models.Application, analyses []models.Docume
 		}
 	}
 
-	for _, requiredType := range requiredAutomatedDocumentTypes {
+	for _, requiredType := range requiredTypes {
 		docAnalysis := latestByType[requiredType]
 		switch strings.ToLower(strings.TrimSpace(docAnalysis.Status)) {
 		case string(analysis.StatusManualReview), "":
@@ -76,6 +85,13 @@ func DetermineAutomatedDecision(app models.Application, analyses []models.Docume
 				Status: "pending",
 				Reason: fmt.Sprintf("Manual review required for %s: %s", requiredType, strings.TrimSpace(docAnalysis.ReasoningSummary)),
 			}
+		}
+	}
+
+	if strings.EqualFold(strings.TrimSpace(app.ApplicantType), "international") {
+		return AutomatedDecision{
+			Status: "approved",
+			Reason: "Automatically approved because the uploaded international passport matches the application and does not indicate Kazakhstan citizenship.",
 		}
 	}
 
