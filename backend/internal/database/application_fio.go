@@ -21,6 +21,12 @@ func normalizeApplicationIdentity(app *models.Application) {
 	} else {
 		app.FIO = extractFIOFromAdditionalInfo(app.AdditionalInfo)
 	}
+	if strings.TrimSpace(app.NameSurname) == "" {
+		app.NameSurname = app.FIO
+	}
+	if strings.TrimSpace(app.FIO) == "" {
+		app.FIO = app.NameSurname
+	}
 	if strings.TrimSpace(app.PassportNumber) == "" {
 		app.PassportNumber = extractPassportNumberFromAdditionalInfo(app.AdditionalInfo)
 	}
@@ -28,6 +34,30 @@ func normalizeApplicationIdentity(app *models.Application) {
 
 func ExtractFIOForSubmission(additionalInfo string) string {
 	return extractFIOFromAdditionalInfo(additionalInfo)
+}
+
+func ExtractNameSurnameForSubmission(additionalInfo string) string {
+	return extractNameSurnameFromAdditionalInfo(additionalInfo)
+}
+
+func ExtractStudentNumberForSubmission(additionalInfo string) string {
+	return extractApplicationDetailFromAdditionalInfo(additionalInfo, "student id", "student number")
+}
+
+func ExtractBirthDateForSubmission(additionalInfo string) string {
+	return extractApplicationDetailFromAdditionalInfo(additionalInfo, "date of birth", "birth date")
+}
+
+func ExtractIINForSubmission(additionalInfo string) string {
+	return extractApplicationDetailFromAdditionalInfo(additionalInfo, "иин", "iin")
+}
+
+func ExtractSchoolForSubmission(additionalInfo string) string {
+	return extractApplicationDetailFromAdditionalInfo(additionalInfo, "school")
+}
+
+func ExtractLevelForSubmission(additionalInfo string) string {
+	return extractApplicationDetailFromAdditionalInfo(additionalInfo, "level")
 }
 
 func ExtractPassportNumberForSubmission(additionalInfo string) string {
@@ -57,6 +87,7 @@ func NormalizeApplicantTypeForSubmission(applicantType, additionalInfo string) s
 func extractFIOFromAdditionalInfo(additionalInfo string) string {
 	firstName := ""
 	lastName := ""
+	nameSurnameFallback := ""
 	for _, line := range strings.Split(additionalInfo, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" {
@@ -70,11 +101,14 @@ func extractFIOFromAdditionalInfo(additionalInfo string) string {
 			strings.HasPrefix(lower, "fio:"),
 			strings.HasPrefix(lower, "fio -"),
 			strings.HasPrefix(lower, "full name:"),
-			strings.HasPrefix(lower, "full name -"),
-			strings.HasPrefix(lower, "name surname:"),
-			strings.HasPrefix(lower, "name surname -"):
+			strings.HasPrefix(lower, "full name -"):
 			if idx := strings.IndexAny(trimmed, ":-"); idx >= 0 && idx+1 < len(trimmed) {
 				return strings.TrimSpace(trimmed[idx+1:])
+			}
+		case strings.HasPrefix(lower, "name surname:"),
+			strings.HasPrefix(lower, "name surname -"):
+			if idx := strings.IndexAny(trimmed, ":-"); idx >= 0 && idx+1 < len(trimmed) {
+				nameSurnameFallback = strings.TrimSpace(trimmed[idx+1:])
 			}
 		case strings.HasPrefix(lower, "name:"),
 			strings.HasPrefix(lower, "name -"),
@@ -105,6 +139,41 @@ func extractFIOFromAdditionalInfo(additionalInfo string) string {
 	}
 	if lastName != "" {
 		return lastName
+	}
+	if nameSurnameFallback != "" {
+		return nameSurnameFallback
+	}
+
+	return ""
+}
+
+func extractNameSurnameFromAdditionalInfo(additionalInfo string) string {
+	value := extractApplicationDetailFromAdditionalInfo(additionalInfo, "name surname", "full name")
+	if value != "" {
+		return value
+	}
+	return extractFIOFromAdditionalInfo(additionalInfo)
+}
+
+func extractApplicationDetailFromAdditionalInfo(additionalInfo string, keys ...string) string {
+	normalizedKeys := make(map[string]bool, len(keys))
+	for _, key := range keys {
+		normalizedKeys[strings.ToLower(strings.TrimSpace(key))] = true
+	}
+
+	for _, line := range strings.Split(additionalInfo, "\n") {
+		key, value, ok := strings.Cut(line, ":")
+		if !ok {
+			key, value, ok = strings.Cut(line, "-")
+		}
+		if !ok {
+			continue
+		}
+
+		normalizedKey := strings.ToLower(strings.TrimSpace(key))
+		if normalizedKeys[normalizedKey] {
+			return strings.TrimSpace(value)
+		}
 	}
 
 	return ""

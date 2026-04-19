@@ -7,6 +7,35 @@ import (
 	"time"
 )
 
+func ensureApplicationIdentitySchema(db *sql.DB) error {
+	statements := []string{
+		`ALTER TABLE applications ADD COLUMN IF NOT EXISTS applicant_type VARCHAR(40)`,
+		`ALTER TABLE applications ADD COLUMN IF NOT EXISTS student_number VARCHAR(40)`,
+		`ALTER TABLE applications ADD COLUMN IF NOT EXISTS name_surname VARCHAR(255)`,
+		`ALTER TABLE applications ADD COLUMN IF NOT EXISTS fio VARCHAR(255)`,
+		`ALTER TABLE applications ADD COLUMN IF NOT EXISTS birth_date DATE`,
+		`ALTER TABLE applications ADD COLUMN IF NOT EXISTS iin VARCHAR(20)`,
+		`ALTER TABLE applications ADD COLUMN IF NOT EXISTS school VARCHAR(255)`,
+		`ALTER TABLE applications ADD COLUMN IF NOT EXISTS level VARCHAR(80)`,
+		`ALTER TABLE applications ADD COLUMN IF NOT EXISTS passport_number VARCHAR(80)`,
+		`ALTER TABLE applications ADD COLUMN IF NOT EXISTS comments TEXT`,
+	}
+
+	for _, statement := range statements {
+		if _, err := db.Exec(statement); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func EnsureRuntimeSchema(db *sql.DB) error {
+	if err := ensureApplicationIdentitySchema(db); err != nil {
+		return err
+	}
+	return ensureRoomAllocationSchema(db)
+}
+
 func SubmitApplication(db *sql.DB, a models.Application) (int, error) {
 	settings, err := GetSystemSettings(db)
 	if err != nil {
@@ -18,12 +47,30 @@ func SubmitApplication(db *sql.DB, a models.Application) (int, error) {
 
 	query := `
 		INSERT INTO applications
-		(student_id, applicant_type, fio, passport_number, year, major, gender, room_preference, additional_info, status, submitted_at, updated_at)
-		VALUES ($1, NULLIF($2, ''), NULLIF($3, ''), NULLIF($4, ''), $5, $6, $7, $8, $9, 'pending', NOW(), NOW())
+		(student_id, applicant_type, student_number, name_surname, fio, birth_date, iin, school, level, passport_number, comments, year, major, gender, room_preference, additional_info, status, submitted_at, updated_at)
+		VALUES ($1, NULLIF($2, ''), NULLIF($3, ''), NULLIF($4, ''), NULLIF($5, ''), $6, NULLIF($7, ''), NULLIF($8, ''), NULLIF($9, ''), NULLIF($10, ''), NULLIF($11, ''), $12, $13, $14, $15, $16, 'pending', NOW(), NOW())
 		RETURNING id
 	`
 	var id int
-	err = db.QueryRow(query, a.StudentID, a.ApplicantType, a.FIO, a.PassportNumber, a.Year, a.Major, a.Gender, a.RoomPreference, a.AdditionalInfo).Scan(&id)
+	err = db.QueryRow(
+		query,
+		a.StudentID,
+		a.ApplicantType,
+		a.StudentNumber,
+		a.NameSurname,
+		a.FIO,
+		a.BirthDate,
+		a.IIN,
+		a.School,
+		a.Level,
+		a.PassportNumber,
+		a.Comments,
+		a.Year,
+		a.Major,
+		a.Gender,
+		a.RoomPreference,
+		a.AdditionalInfo,
+	).Scan(&id)
 	if err != nil {
 		return 0, err
 	}
@@ -39,7 +86,9 @@ func UpdateStudentApplicationDetails(db *sql.DB, studentID int, a models.Applica
 		    updated_at = NOW()
 		WHERE id = $3
 		  AND student_id = $4
-		RETURNING id, student_id, COALESCE(fio, ''), year, major, gender, COALESCE(room_preference, ''), COALESCE(additional_info, ''),
+		RETURNING id, student_id, COALESCE(student_number, ''), COALESCE(name_surname, ''), COALESCE(fio, ''), birth_date,
+		          COALESCE(iin, ''), COALESCE(school, ''), COALESCE(level, ''), COALESCE(comments, ''),
+		          year, major, gender, COALESCE(room_preference, ''), COALESCE(additional_info, ''),
 		          COALESCE(applicant_type, 'local'), COALESCE(passport_number, ''), status, submitted_at, updated_at, rejected_reason, reviewed_by, review_timestamp
 	`
 
@@ -53,7 +102,14 @@ func UpdateStudentApplicationDetails(db *sql.DB, studentID int, a models.Applica
 	).Scan(
 		&updated.ID,
 		&updated.StudentID,
+		&updated.StudentNumber,
+		&updated.NameSurname,
 		&updated.FIO,
+		&updated.BirthDate,
+		&updated.IIN,
+		&updated.School,
+		&updated.Level,
+		&updated.Comments,
 		&updated.Year,
 		&updated.Major,
 		&updated.Gender,
@@ -85,7 +141,9 @@ func GetApplicationByID(db *sql.DB, id int) (models.Application, error) {
 	var a models.Application
 
 	query := `
-		SELECT id, student_id, COALESCE(fio, ''), year, major, gender, COALESCE(room_preference, ''), COALESCE(additional_info, ''),
+		SELECT id, student_id, COALESCE(student_number, ''), COALESCE(name_surname, ''), COALESCE(fio, ''), birth_date,
+		       COALESCE(iin, ''), COALESCE(school, ''), COALESCE(level, ''), COALESCE(comments, ''),
+		       year, major, gender, COALESCE(room_preference, ''), COALESCE(additional_info, ''),
 		       COALESCE(applicant_type, 'local'), COALESCE(passport_number, ''), status, submitted_at, updated_at, rejected_reason, reviewed_by, review_timestamp
 		FROM applications
 		WHERE id = $1
@@ -94,7 +152,14 @@ func GetApplicationByID(db *sql.DB, id int) (models.Application, error) {
 	err := db.QueryRow(query, id).Scan(
 		&a.ID,
 		&a.StudentID,
+		&a.StudentNumber,
+		&a.NameSurname,
 		&a.FIO,
+		&a.BirthDate,
+		&a.IIN,
+		&a.School,
+		&a.Level,
+		&a.Comments,
 		&a.Year,
 		&a.Major,
 		&a.Gender,
@@ -120,7 +185,9 @@ func GetApplicationByID(db *sql.DB, id int) (models.Application, error) {
 
 func GetApplicationsByStudent(db *sql.DB, studentID int) ([]models.Application, error) {
 	query := `
-		SELECT id, student_id, COALESCE(fio, ''), year, major, gender, COALESCE(room_preference, ''), COALESCE(additional_info, ''),
+		SELECT id, student_id, COALESCE(student_number, ''), COALESCE(name_surname, ''), COALESCE(fio, ''), birth_date,
+		       COALESCE(iin, ''), COALESCE(school, ''), COALESCE(level, ''), COALESCE(comments, ''),
+		       year, major, gender, COALESCE(room_preference, ''), COALESCE(additional_info, ''),
 		       COALESCE(applicant_type, 'local'), COALESCE(passport_number, ''), status, submitted_at, updated_at, rejected_reason, reviewed_by, review_timestamp
 		FROM applications
 		WHERE student_id = $1
@@ -139,7 +206,14 @@ func GetApplicationsByStudent(db *sql.DB, studentID int) ([]models.Application, 
 		if err := rows.Scan(
 			&a.ID,
 			&a.StudentID,
+			&a.StudentNumber,
+			&a.NameSurname,
 			&a.FIO,
+			&a.BirthDate,
+			&a.IIN,
+			&a.School,
+			&a.Level,
+			&a.Comments,
 			&a.Year,
 			&a.Major,
 			&a.Gender,

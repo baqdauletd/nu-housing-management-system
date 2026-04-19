@@ -27,6 +27,9 @@ func main() {
 	if err != nil {
 		log.Fatal("Failed to connect to PostgreSQL:", err)
 	}
+	if err := database.EnsureRuntimeSchema(db); err != nil {
+		log.Fatal("Failed to ensure database schema:", err)
+	}
 	log.Println("Connected to PostgreSQL")
 
 	// Redis

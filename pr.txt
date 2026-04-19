@@ -1,0 +1,26 @@
+Dear Students,
+Fall semester is coming, and Student Housing is looking forward to seeing you on Campus! 
+If you need accommodation in the dormitory, please, read this email carefully!
+
+- Open the application link
+- Follow the instructions
+- Make sure your application is complete and sent on time. 
+
+Deadline for application is June 14th, 2024 at 23:59 Astana time
+No late applications will be accepted despite any extenuating cases.
+
+
+Eligibility requirements:
+1. Have no registered real estate property in Astana (students, parents);
+2. Being a non-Astana resident (students, parents);
+
+ASTANA RESIDENTS ARE NOT ELIGIBLE FOR ON-CAMPUS ACCOMMODATION IN FALL 2024! WE WILL ANNOUNCE A SEPARATE APPLICATION CALL FOR ASTANA RESIDENTS ONCE THERE IS A POSSIBILITY.
+
+Please note that students whose parents work and have a property or/and registration in Astana will be counted as Astana residents.
+
+In order to apply please fill in the form and make sure to attach all of the required documents.
+
+FAQ:
+1) If your parents are unemployed, you should submit the Certificate of registration as unemployed issued from Egov or pension contribution report that indicates no pension funding for the last 6 months.
+2) If your parents are retired, you should submit the Retirement passport/certificate.
+There is a big new feature I need to add now. It is for automating the decision makign behind aloowing the dormitory eligibility by adding the analyzer to automtitically scan the documents and return a verdict based on that, whther student is elgible or not. 
