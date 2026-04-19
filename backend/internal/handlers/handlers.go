@@ -203,8 +203,15 @@ func SubmitApplication(db *sql.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var body struct {
 			ApplicantType  string `json:"applicant_type"`
+			StudentNumber  string `json:"student_number"`
+			NameSurname    string `json:"name_surname"`
 			FIO            string `json:"fio"`
+			BirthDate      string `json:"birth_date"`
+			IIN            string `json:"iin"`
+			School         string `json:"school"`
+			Level          string `json:"level"`
 			PassportNumber string `json:"passport_number"`
+			Comments       string `json:"comments"`
 			Year           int    `json:"year" binding:"required"`
 			Major          string `json:"major" binding:"required"`
 			Gender         string `json:"gender" binding:"required"`
@@ -222,6 +229,24 @@ func SubmitApplication(db *sql.DB) gin.HandlerFunc {
 			return
 		}
 		studentID := uid.(int)
+
+		parseBirthDate := func(raw string) (*time.Time, bool) {
+			rawBirthDate := strings.TrimSpace(raw)
+			if rawBirthDate == "" {
+				return nil, true
+			}
+			parsed, err := time.Parse("2006-01-02", rawBirthDate)
+			if err != nil {
+				return nil, false
+			}
+			return &parsed, true
+		}
+
+		birthDate, ok := parseBirthDate(body.BirthDate)
+		if !ok {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid birth_date", "details": "expected YYYY-MM-DD"})
+			return
+		}
 
 		settings, err := database.GetSystemSettings(db)
 		if err != nil {
@@ -241,8 +266,15 @@ func SubmitApplication(db *sql.DB) gin.HandlerFunc {
 		app := models.Application{
 			StudentID:      studentID,
 			ApplicantType:  database.NormalizeApplicantTypeForSubmission(body.ApplicantType, body.AdditionalInfo),
+			StudentNumber:  strings.TrimSpace(body.StudentNumber),
+			NameSurname:    strings.TrimSpace(body.NameSurname),
 			FIO:            strings.TrimSpace(body.FIO),
+			BirthDate:      birthDate,
+			IIN:            strings.TrimSpace(body.IIN),
+			School:         strings.TrimSpace(body.School),
+			Level:          strings.TrimSpace(body.Level),
 			PassportNumber: strings.TrimSpace(body.PassportNumber),
+			Comments:       strings.TrimSpace(body.Comments),
 			Year:           body.Year,
 			Major:          body.Major,
 			Gender:         body.Gender,
@@ -251,6 +283,33 @@ func SubmitApplication(db *sql.DB) gin.HandlerFunc {
 		}
 		if app.FIO == "" {
 			app.FIO = database.ExtractFIOForSubmission(body.AdditionalInfo)
+		}
+		if app.NameSurname == "" {
+			app.NameSurname = database.ExtractNameSurnameForSubmission(body.AdditionalInfo)
+		}
+		if app.NameSurname == "" {
+			app.NameSurname = app.FIO
+		}
+		if app.StudentNumber == "" {
+			app.StudentNumber = database.ExtractStudentNumberForSubmission(body.AdditionalInfo)
+		}
+		if app.BirthDate == nil {
+			extractedBirthDate := database.ExtractBirthDateForSubmission(body.AdditionalInfo)
+			parsedBirthDate, ok := parseBirthDate(extractedBirthDate)
+			if !ok {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid birth_date", "details": "expected YYYY-MM-DD"})
+				return
+			}
+			app.BirthDate = parsedBirthDate
+		}
+		if app.IIN == "" {
+			app.IIN = database.ExtractIINForSubmission(body.AdditionalInfo)
+		}
+		if app.School == "" {
+			app.School = database.ExtractSchoolForSubmission(body.AdditionalInfo)
+		}
+		if app.Level == "" {
+			app.Level = database.ExtractLevelForSubmission(body.AdditionalInfo)
 		}
 		if app.PassportNumber == "" {
 			app.PassportNumber = database.ExtractPassportNumberForSubmission(body.AdditionalInfo)
@@ -279,9 +338,14 @@ func GetMyApplications(db *sql.DB) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch applications", "details": err.Error()})
 			return
 		}
+		roomAllocations, err := listRoomAllocationPayloads(db, apps)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch room allocations", "details": err.Error()})
+			return
+		}
 		response := make([]gin.H, 0, len(apps))
 		for _, app := range apps {
-			response = append(response, buildBasicApplicationPayload(db, app, ""))
+			response = append(response, buildBasicApplicationPayloadWithRoom(app, "", roomAllocations[app.ID]))
 		}
 		c.JSON(http.StatusOK, response)
 	}
@@ -353,21 +417,37 @@ func UpdateMyApplication(db *sql.DB) gin.HandlerFunc {
 func GetApplicationStatus(db *sql.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		idStr := c.Param("id")
-		id, _ := strconv.Atoi(idStr)
-		if err := database.ApplyAutomatedDecision(db, id); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to refresh application status", "details": err.Error()})
+		id, err := strconv.Atoi(idStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid application id"})
 			return
 		}
+
+		uid, ok := c.Get("user_id")
+		if !ok {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "user_id missing in token"})
+			return
+		}
+		studentID := uid.(int)
+
 		app, err := database.GetApplicationByID(db, id)
 		if err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "application not found"})
 			return
 		}
+		if app.StudentID != studentID {
+			c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
+			return
+		}
+		roomAllocation := lookupRoomAllocationPayload(db, app.ID)
 		c.JSON(http.StatusOK, gin.H{
 			"status":          app.Status,
+			"is_approved":     strings.EqualFold(strings.TrimSpace(app.Status), "approved"),
 			"reason":          app.DecisionReason,
 			"decision_reason": app.DecisionReason,
 			"rejected_reason": app.RejectedReason,
+			"room_allocation": roomAllocation,
+			"room":            roomLabelFromPayload(roomAllocation),
 		})
 	}
 }
@@ -729,9 +809,14 @@ func HousingListApplications(db *sql.DB) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list applications", "details": err.Error()})
 			return
 		}
+		roomAllocations, err := listRoomAllocationPayloads(db, apps)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch room allocations", "details": err.Error()})
+			return
+		}
 		response := make([]gin.H, 0, len(apps))
 		for _, app := range apps {
-			response = append(response, buildBasicApplicationPayload(db, app, ""))
+			response = append(response, buildBasicApplicationPayloadWithRoom(app, "", roomAllocations[app.ID]))
 		}
 		c.JSON(http.StatusOK, response)
 	}
@@ -1108,18 +1193,50 @@ func buildApplicationReviewPayload(db *sql.DB, app models.Application) (gin.H, e
 		})
 	}
 
+	identity := applicationIdentityPayload(app)
 	return gin.H{
 		"id":                    app.ID,
-		"student_id":            app.StudentID,
+		"application_id":        app.ID,
+		"user_id":               app.StudentID,
+		"student_user_id":       app.StudentID,
+		"student_db_id":         app.StudentID,
+		"student_id":            identity["student_id"],
+		"studentId":             identity["student_id"],
 		"applicant_type":        app.ApplicantType,
-		"fio":                   app.FIO,
+		"student_number":        identity["student_number"],
+		"studentNumber":         identity["student_number"],
+		"name_surname":          identity["name_surname"],
+		"nameSurname":           identity["name_surname"],
+		"fio":                   identity["fio"],
+		"name":                  identity["name"],
+		"display_name":          identity["name"],
+		"displayName":           identity["name"],
+		"full_name":             identity["name"],
+		"fullName":              identity["name"],
+		"student_name":          identity["name"],
+		"studentName":           identity["name"],
+		"applicant_name":        identity["name"],
+		"applicantName":         identity["name"],
+		"first_name":            identity["first_name"],
+		"firstName":             identity["first_name"],
+		"last_name":             identity["last_name"],
+		"lastName":              identity["last_name"],
+		"student":               identity,
+		"applicant":             identity,
+		"user":                  identity,
+		"birth_date":            app.BirthDate,
+		"iin":                   app.IIN,
+		"school":                app.School,
+		"level":                 app.Level,
 		"passport_number":       app.PassportNumber,
+		"comments":              app.Comments,
 		"year":                  app.Year,
 		"major":                 app.Major,
 		"gender":                app.Gender,
 		"room_preference":       app.RoomPreference,
 		"additional_info":       app.AdditionalInfo,
 		"status":                app.Status,
+		"is_approved":           strings.EqualFold(strings.TrimSpace(app.Status), "approved"),
 		"submitted_at":          app.SubmittedAt,
 		"updated_at":            app.UpdatedAt,
 		"rejected_reason":       app.RejectedReason,
@@ -1130,11 +1247,16 @@ func buildApplicationReviewPayload(db *sql.DB, app models.Application) (gin.H, e
 		"review_reasons":        reviewReasons,
 		"problematic_documents": problematicDocuments,
 		"room_allocation":       roomAllocation,
+		"room":                  roomLabelFromPayload(roomAllocation),
 		"editable_details":      extractEditableApplicationDetails(app.AdditionalInfo),
 	}, nil
 }
 
 func buildBasicApplicationPayload(db *sql.DB, app models.Application, reviewDetailsError string) gin.H {
+	return buildBasicApplicationPayloadWithRoom(app, reviewDetailsError, lookupRoomAllocationPayload(db, app.ID))
+}
+
+func buildBasicApplicationPayloadWithRoom(app models.Application, reviewDetailsError string, roomAllocation gin.H) gin.H {
 	manualReviewReasons := []string{}
 	reviewReasons := []string{}
 	if app.DecisionReason != nil && strings.TrimSpace(*app.DecisionReason) != "" {
@@ -1143,18 +1265,50 @@ func buildBasicApplicationPayload(db *sql.DB, app models.Application, reviewDeta
 			manualReviewReasons = append(manualReviewReasons, strings.TrimSpace(*app.DecisionReason))
 		}
 	}
+	identity := applicationIdentityPayload(app)
 	return gin.H{
 		"id":                    app.ID,
-		"student_id":            app.StudentID,
+		"application_id":        app.ID,
+		"user_id":               app.StudentID,
+		"student_user_id":       app.StudentID,
+		"student_db_id":         app.StudentID,
+		"student_id":            identity["student_id"],
+		"studentId":             identity["student_id"],
 		"applicant_type":        app.ApplicantType,
-		"fio":                   app.FIO,
+		"student_number":        identity["student_number"],
+		"studentNumber":         identity["student_number"],
+		"name_surname":          identity["name_surname"],
+		"nameSurname":           identity["name_surname"],
+		"fio":                   identity["fio"],
+		"name":                  identity["name"],
+		"display_name":          identity["name"],
+		"displayName":           identity["name"],
+		"full_name":             identity["name"],
+		"fullName":              identity["name"],
+		"student_name":          identity["name"],
+		"studentName":           identity["name"],
+		"applicant_name":        identity["name"],
+		"applicantName":         identity["name"],
+		"first_name":            identity["first_name"],
+		"firstName":             identity["first_name"],
+		"last_name":             identity["last_name"],
+		"lastName":              identity["last_name"],
+		"student":               identity,
+		"applicant":             identity,
+		"user":                  identity,
+		"birth_date":            app.BirthDate,
+		"iin":                   app.IIN,
+		"school":                app.School,
+		"level":                 app.Level,
 		"passport_number":       app.PassportNumber,
+		"comments":              app.Comments,
 		"year":                  app.Year,
 		"major":                 app.Major,
 		"gender":                app.Gender,
 		"room_preference":       app.RoomPreference,
 		"additional_info":       app.AdditionalInfo,
 		"status":                app.Status,
+		"is_approved":           strings.EqualFold(strings.TrimSpace(app.Status), "approved"),
 		"submitted_at":          app.SubmittedAt,
 		"updated_at":            app.UpdatedAt,
 		"rejected_reason":       app.RejectedReason,
@@ -1164,10 +1318,88 @@ func buildBasicApplicationPayload(db *sql.DB, app models.Application, reviewDeta
 		"manual_review_reasons": manualReviewReasons,
 		"review_reasons":        reviewReasons,
 		"problematic_documents": []gin.H{},
-		"room_allocation":       nil,
+		"room_allocation":       roomAllocation,
+		"room":                  roomLabelFromPayload(roomAllocation),
 		"editable_details":      extractEditableApplicationDetails(app.AdditionalInfo),
 		"review_details_error":  reviewDetailsError,
 	}
+}
+
+func listRoomAllocationPayloads(db *sql.DB, apps []models.Application) (map[int]gin.H, error) {
+	result := make(map[int]gin.H, len(apps))
+	if db == nil || len(apps) == 0 {
+		return result, nil
+	}
+
+	applicationIDs := make([]int, 0, len(apps))
+	for _, app := range apps {
+		applicationIDs = append(applicationIDs, app.ID)
+	}
+
+	allocations, err := database.ListRoomAllocationsByApplicationIDs(db, applicationIDs)
+	if err != nil {
+		return nil, err
+	}
+	for applicationID, allocation := range allocations {
+		result[applicationID] = roomAllocationPayload(allocation)
+	}
+	return result, nil
+}
+
+func applicationIdentityPayload(app models.Application) gin.H {
+	studentNumber := strings.TrimSpace(app.StudentNumber)
+	nameSurname := strings.TrimSpace(app.NameSurname)
+	fio := strings.TrimSpace(app.FIO)
+	displayName := applicationDisplayName(app)
+	firstName, lastName := splitDisplayName(displayName)
+
+	return gin.H{
+		"id":             studentNumber,
+		"student_id":     studentNumber,
+		"studentId":      studentNumber,
+		"student_number": studentNumber,
+		"studentNumber":  studentNumber,
+		"name":           displayName,
+		"display_name":   displayName,
+		"displayName":    displayName,
+		"full_name":      displayName,
+		"fullName":       displayName,
+		"student_name":   displayName,
+		"studentName":    displayName,
+		"applicant_name": displayName,
+		"applicantName":  displayName,
+		"name_surname":   nameSurname,
+		"nameSurname":    nameSurname,
+		"fio":            fio,
+		"first_name":     firstName,
+		"firstName":      firstName,
+		"last_name":      lastName,
+		"lastName":       lastName,
+	}
+}
+
+func applicationDisplayName(app models.Application) string {
+	for _, value := range []string{
+		app.NameSurname,
+		app.FIO,
+		app.StudentNumber,
+	} {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
+func splitDisplayName(displayName string) (string, string) {
+	parts := strings.Fields(strings.TrimSpace(displayName))
+	if len(parts) == 0 {
+		return "", ""
+	}
+	if len(parts) == 1 {
+		return parts[0], ""
+	}
+	return parts[0], strings.Join(parts[1:], " ")
 }
 
 func lookupRoomAllocationPayload(db *sql.DB, applicationID int) gin.H {
@@ -1178,6 +1410,10 @@ func lookupRoomAllocationPayload(db *sql.DB, applicationID int) gin.H {
 	if err != nil {
 		return nil
 	}
+	return roomAllocationPayload(allocation)
+}
+
+func roomAllocationPayload(allocation models.RoomAllocation) gin.H {
 	return gin.H{
 		"id":             allocation.ID,
 		"application_id": allocation.ApplicationID,
@@ -1185,8 +1421,19 @@ func lookupRoomAllocationPayload(db *sql.DB, applicationID int) gin.H {
 		"block":          allocation.Block,
 		"room_number":    allocation.RoomNumber,
 		"bed_number":     allocation.BedNumber,
+		"room":           fmt.Sprintf("%d.%d", allocation.Block, allocation.RoomNumber),
 		"created_at":     allocation.CreatedAt,
 	}
+}
+
+func roomLabelFromPayload(payload gin.H) string {
+	if payload == nil {
+		return ""
+	}
+	if room, ok := payload["room"].(string); ok {
+		return room
+	}
+	return ""
 }
 
 func mergeEditableApplicationDetails(additionalInfo string, apartmentInAstana, parentsWorkInAstana, astanaResident *bool, preferredRoommate *string) string {

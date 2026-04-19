@@ -17,7 +17,9 @@ type HousingApplicationFilters struct {
 
 func HousingListApplications(db *sql.DB, filters HousingApplicationFilters) ([]models.Application, error) {
 	baseQuery := `
-      SELECT id, student_id, COALESCE(fio, ''), year, major, gender, COALESCE(room_preference, ''), COALESCE(additional_info, ''),
+      SELECT id, student_id, COALESCE(student_number, ''), COALESCE(name_surname, ''), COALESCE(fio, ''), birth_date,
+             COALESCE(iin, ''), COALESCE(school, ''), COALESCE(level, ''), COALESCE(comments, ''),
+             year, major, gender, COALESCE(room_preference, ''), COALESCE(additional_info, ''),
              COALESCE(applicant_type, 'local'), COALESCE(passport_number, ''), status, submitted_at, updated_at, rejected_reason, reviewed_by, review_timestamp
       FROM applications
    `
@@ -55,9 +57,11 @@ func HousingListApplications(db *sql.DB, filters HousingApplicationFilters) ([]m
 			CAST(student_id AS TEXT) ILIKE $%d OR
 			CAST(id AS TEXT) ILIKE $%d OR
 			COALESCE(fio, '') ILIKE $%d OR
+			COALESCE(name_surname, '') ILIKE $%d OR
+			COALESCE(student_number, '') ILIKE $%d OR
 			COALESCE(additional_info, '') ILIKE $%d OR
 			major ILIKE $%d
-		)`, argIndex, argIndex, argIndex, argIndex, argIndex))
+		)`, argIndex, argIndex, argIndex, argIndex, argIndex, argIndex, argIndex))
 		args = append(args, "%"+search+"%")
 		argIndex++
 	}
@@ -81,7 +85,14 @@ func HousingListApplications(db *sql.DB, filters HousingApplicationFilters) ([]m
 		if err := rows.Scan(
 			&a.ID,
 			&a.StudentID,
+			&a.StudentNumber,
+			&a.NameSurname,
 			&a.FIO,
+			&a.BirthDate,
+			&a.IIN,
+			&a.School,
+			&a.Level,
+			&a.Comments,
 			&a.Year,
 			&a.Major,
 			&a.Gender,

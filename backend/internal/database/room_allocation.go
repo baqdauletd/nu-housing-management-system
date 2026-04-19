@@ -9,14 +9,16 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lib/pq"
+
 	"nu-housing-management-system/backend/internal/models"
 )
 
 type allocationApplicant struct {
-	ApplicationID       int
-	StudentID           int
-	Gender              string
-	Major               string
+	ApplicationID        int
+	StudentID            int
+	Gender               string
+	Major                string
 	PreferredRoommateIDs []int
 }
 
@@ -125,16 +127,12 @@ type DormInventoryFilters struct {
 }
 
 func ListDormInventory(db *sql.DB, filters DormInventoryFilters) ([]models.DormInventoryRow, error) {
-	if err := ensureRoomAllocationSchema(db); err != nil {
-		return nil, err
-	}
-
 	query := `
 		SELECT
 			ra.application_id,
 			ra.student_id,
 			u.nu_id,
-			COALESCE(a.fio, ''),
+			COALESCE(NULLIF(a.fio, ''), NULLIF(a.name_surname, ''), u.email),
 			u.email,
 			COALESCE(a.gender, ''),
 			COALESCE(a.major, ''),
@@ -176,9 +174,10 @@ func ListDormInventory(db *sql.DB, filters DormInventoryFilters) ([]models.DormI
 			u.nu_id ILIKE $%d OR
 			u.email ILIKE $%d OR
 			COALESCE(a.fio, '') ILIKE $%d OR
+			COALESCE(a.name_surname, '') ILIKE $%d OR
 			CAST(ra.block AS TEXT) ILIKE $%d OR
 			CAST(ra.room_number AS TEXT) ILIKE $%d
-		)`, argIndex, argIndex, argIndex, argIndex, argIndex)
+		)`, argIndex, argIndex, argIndex, argIndex, argIndex, argIndex)
 		args = append(args, "%"+search+"%")
 		argIndex++
 	}
@@ -242,10 +241,6 @@ func ListDormInventory(db *sql.DB, filters DormInventoryFilters) ([]models.DormI
 }
 
 func GetRoomAllocationByApplicationID(db *sql.DB, applicationID int) (models.RoomAllocation, error) {
-	if err := ensureRoomAllocationSchema(db); err != nil {
-		return models.RoomAllocation{}, err
-	}
-
 	var allocation models.RoomAllocation
 	err := db.QueryRow(`
 		SELECT id, application_id, student_id, block, room_number, bed_number, created_at
@@ -261,6 +256,40 @@ func GetRoomAllocationByApplicationID(db *sql.DB, applicationID int) (models.Roo
 		&allocation.CreatedAt,
 	)
 	return allocation, err
+}
+
+func ListRoomAllocationsByApplicationIDs(db *sql.DB, applicationIDs []int) (map[int]models.RoomAllocation, error) {
+	result := make(map[int]models.RoomAllocation, len(applicationIDs))
+	if len(applicationIDs) == 0 {
+		return result, nil
+	}
+
+	rows, err := db.Query(`
+		SELECT id, application_id, student_id, block, room_number, bed_number, created_at
+		FROM room_allocations
+		WHERE application_id = ANY($1)
+	`, pq.Array(applicationIDs))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var allocation models.RoomAllocation
+		if err := rows.Scan(
+			&allocation.ID,
+			&allocation.ApplicationID,
+			&allocation.StudentID,
+			&allocation.Block,
+			&allocation.RoomNumber,
+			&allocation.BedNumber,
+			&allocation.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		result[allocation.ApplicationID] = allocation
+	}
+	return result, rows.Err()
 }
 
 func listApprovedApplicantsForAllocation(db *sql.DB) ([]allocationApplicant, error) {
