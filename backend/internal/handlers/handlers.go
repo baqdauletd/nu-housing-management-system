@@ -17,8 +17,10 @@ import (
 
 	"nu-housing-management-system/backend/internal/analysis"
 	"nu-housing-management-system/backend/internal/auth"
+	"nu-housing-management-system/backend/internal/config"
 	"nu-housing-management-system/backend/internal/database"
 	"nu-housing-management-system/backend/internal/models"
+	"nu-housing-management-system/backend/internal/notifications"
 
 	"github.com/gin-gonic/gin"
 	"github.com/lib/pq"
@@ -463,7 +465,7 @@ func GetSystemSettings(db *sql.DB) gin.HandlerFunc {
 	}
 }
 
-func UpdateSystemSettings(db *sql.DB) gin.HandlerFunc {
+func UpdateSystemSettings(db *sql.DB, cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var body struct {
 			ApplicationsEnabled *bool     `json:"applications_enabled"`
@@ -482,6 +484,7 @@ func UpdateSystemSettings(db *sql.DB) gin.HandlerFunc {
 			return
 		}
 		wasApplicationsEnabled := settings.ApplicationsEnabled
+		var emailResult *applicationEmailResult
 
 		if body.ApplicationsEnabled != nil {
 			settings.ApplicationsEnabled = *body.ApplicationsEnabled
@@ -527,13 +530,40 @@ func UpdateSystemSettings(db *sql.DB) gin.HandlerFunc {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "applications were closed but room allocation failed", "details": err.Error()})
 				return
 			}
+			recipients, err := database.ListApplicationNotificationRecipients(db)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "applications were closed but notification recipients could not be loaded", "details": err.Error()})
+				return
+			}
+			if err := database.InsertApplicationClosureNotifications(db, recipients); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "applications were closed but notifications could not be created", "details": err.Error()})
+				return
+			}
+			result := sendApplicationClosureEmails(cfg, recipients)
+			if result.Failed > 0 {
+				c.JSON(http.StatusInternalServerError, gin.H{
+					"error":                       "applications were closed but some email notifications failed",
+					"email_notifications_sent":    result.Sent,
+					"email_notifications_failed":  result.Failed,
+					"email_notifications_skipped": result.Skipped,
+					"details":                     result.Errors,
+				})
+				return
+			}
+			emailResult = &result
 		}
 
 		if userID, _, ok := requestIdentity(c); ok {
 			db.Exec(`INSERT INTO audit_logs (actor_id, action, entity, entity_id) VALUES ($1, 'update_settings', 'system_settings', $2)`, userID, settings.ID)
 		}
 
-		c.JSON(http.StatusOK, buildSystemSettingsResponse(settings))
+		response := buildSystemSettingsResponse(settings)
+		if emailResult != nil {
+			response["email_notifications_sent"] = emailResult.Sent
+			response["email_notifications_failed"] = emailResult.Failed
+			response["email_notifications_skipped"] = emailResult.Skipped
+		}
+		c.JSON(http.StatusOK, response)
 	}
 }
 
@@ -1617,4 +1647,54 @@ func parseDateField(raw string) (*time.Time, error) {
 	}
 	date := parsed.UTC()
 	return &date, nil
+}
+
+type applicationEmailResult struct {
+	Sent    int
+	Failed  int
+	Skipped int
+	Errors  []string
+}
+
+func sendApplicationClosureEmails(cfg *config.Config, recipients []database.ApplicationNotificationRecipient) applicationEmailResult {
+	result := applicationEmailResult{}
+	sender := notifications.NewEmailSender(cfg)
+	if !sender.Configured() {
+		result.Skipped = len(recipients)
+		return result
+	}
+
+	for _, recipient := range recipients {
+		message := buildApplicationClosureEmail(recipient)
+		if strings.TrimSpace(message.To) == "" {
+			result.Skipped++
+			continue
+		}
+		if err := sender.Send(message); err != nil {
+			result.Failed++
+			if len(result.Errors) < 10 {
+				result.Errors = append(result.Errors, fmt.Sprintf("%s: %v", message.To, err))
+			}
+			continue
+		}
+		result.Sent++
+	}
+
+	return result
+}
+
+func buildApplicationClosureEmail(recipient database.ApplicationNotificationRecipient) notifications.EmailMessage {
+	name := strings.TrimSpace(recipient.DisplayName)
+	if name == "" {
+		name = "Student"
+	}
+
+	message := database.ApplicationClosureNotificationMessage(recipient)
+	body := fmt.Sprintf("Dear %s,\n\n%s\n\nRegards,\nNU Housing", name, message)
+
+	return notifications.EmailMessage{
+		To:      strings.TrimSpace(recipient.Email),
+		Subject: "NU Housing application result",
+		Body:    body,
+	}
 }

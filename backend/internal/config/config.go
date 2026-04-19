@@ -32,6 +32,12 @@ type Config struct {
 	StripePaymentCurrency    string
 	StripePaymentAmountKZT   int
 	StripePaymentDescription string
+
+	SMTPHost     string
+	SMTPPort     int
+	SMTPUsername string
+	SMTPPassword string
+	SMTPFrom     string
 }
 
 func LoadConfig() (*Config, error) {
@@ -65,6 +71,11 @@ func LoadConfig() (*Config, error) {
 		StripePaymentCurrency:    normalizeStripeCurrency(viper.GetString("STRIPE_PAYMENT_CURRENCY")),
 		StripePaymentAmountKZT:   viper.GetInt("STRIPE_PAYMENT_AMOUNT_KZT"),
 		StripePaymentDescription: viper.GetString("STRIPE_PAYMENT_DESCRIPTION"),
+		SMTPHost:                 viper.GetString("SMTP_HOST"),
+		SMTPPort:                 viper.GetInt("SMTP_PORT"),
+		SMTPUsername:             viper.GetString("SMTP_USERNAME"),
+		SMTPPassword:             viper.GetString("SMTP_PASSWORD"),
+		SMTPFrom:                 viper.GetString("SMTP_FROM"),
 	}
 
 	var missing []string

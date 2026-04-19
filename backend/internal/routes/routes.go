@@ -66,7 +66,7 @@ func RegisterRoutes(
 		housing.PATCH("/applications/:id/approve", handlers.HousingApprove(db))
 		housing.PATCH("/applications/:id/reject", handlers.HousingReject(db))
 		housing.GET("/settings", handlers.GetSystemSettings(db))
-		housing.PATCH("/settings", handlers.UpdateSystemSettings(db))
+		housing.PATCH("/settings", handlers.UpdateSystemSettings(db, cfg))
 	}
 
 	admin := r.Group("/admin")
@@ -79,6 +79,6 @@ func RegisterRoutes(
 		admin.GET("/logs", handlers.AdminSystemLogs(db))
 		admin.GET("/stats", handlers.AdminStats(db))
 		admin.GET("/settings", handlers.GetSystemSettings(db))
-		admin.PATCH("/settings", handlers.UpdateSystemSettings(db))
+		admin.PATCH("/settings", handlers.UpdateSystemSettings(db, cfg))
 	}
 }

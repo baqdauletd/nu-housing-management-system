@@ -41,6 +41,19 @@ type pendingAllocation struct {
 	BedNumber     int
 }
 
+type ApplicationNotificationRecipient struct {
+	ApplicationID  int
+	StudentID      int
+	Email          string
+	StudentNumber  string
+	DisplayName    string
+	Status         string
+	RejectedReason string
+	Block          *int
+	RoomNumber     *int
+	BedNumber      *int
+}
+
 func RunRoomAllocation(db *sql.DB) error {
 	if err := ensureRoomAllocationSchema(db); err != nil {
 		return err
@@ -82,10 +95,6 @@ func RunRoomAllocation(db *sql.DB) error {
 			return err
 		}
 
-		message := fmt.Sprintf("Room allocated: block %d, room %d, bed %d.", assignment.Block, assignment.RoomNumber, assignment.BedNumber)
-		if _, err := tx.Exec(`INSERT INTO notifications (user_id, message, read, created_at) VALUES ($1, $2, FALSE, NOW())`, assignment.StudentID, message); err != nil {
-			return err
-		}
 	}
 
 	return tx.Commit()
@@ -290,6 +299,108 @@ func ListRoomAllocationsByApplicationIDs(db *sql.DB, applicationIDs []int) (map[
 		result[allocation.ApplicationID] = allocation
 	}
 	return result, rows.Err()
+}
+
+func ListApplicationNotificationRecipients(db *sql.DB) ([]ApplicationNotificationRecipient, error) {
+	rows, err := db.Query(`
+		SELECT
+			a.id,
+			a.student_id,
+			u.email,
+			COALESCE(NULLIF(a.student_number, ''), u.nu_id),
+			COALESCE(NULLIF(a.name_surname, ''), NULLIF(a.fio, ''), u.email),
+			COALESCE(a.status, ''),
+			COALESCE(a.rejected_reason, ''),
+			ra.block,
+			ra.room_number,
+			ra.bed_number
+		FROM applications a
+		JOIN users u ON u.id = a.student_id
+		LEFT JOIN room_allocations ra ON ra.application_id = a.id
+		WHERE COALESCE(a.status, '') <> 'canceled'
+		ORDER BY a.id
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var recipients []ApplicationNotificationRecipient
+	for rows.Next() {
+		var recipient ApplicationNotificationRecipient
+		var block, roomNumber, bedNumber sql.NullInt64
+		if err := rows.Scan(
+			&recipient.ApplicationID,
+			&recipient.StudentID,
+			&recipient.Email,
+			&recipient.StudentNumber,
+			&recipient.DisplayName,
+			&recipient.Status,
+			&recipient.RejectedReason,
+			&block,
+			&roomNumber,
+			&bedNumber,
+		); err != nil {
+			return nil, err
+		}
+		if block.Valid {
+			value := int(block.Int64)
+			recipient.Block = &value
+		}
+		if roomNumber.Valid {
+			value := int(roomNumber.Int64)
+			recipient.RoomNumber = &value
+		}
+		if bedNumber.Valid {
+			value := int(bedNumber.Int64)
+			recipient.BedNumber = &value
+		}
+		recipients = append(recipients, recipient)
+	}
+	return recipients, rows.Err()
+}
+
+func InsertApplicationClosureNotifications(db *sql.DB, recipients []ApplicationNotificationRecipient) error {
+	if len(recipients) == 0 {
+		return nil
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	for _, recipient := range recipients {
+		message := ApplicationClosureNotificationMessage(recipient)
+		if _, err := tx.Exec(
+			`INSERT INTO notifications (user_id, message, read, created_at) VALUES ($1, $2, FALSE, NOW())`,
+			recipient.StudentID,
+			message,
+		); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
+func ApplicationClosureNotificationMessage(recipient ApplicationNotificationRecipient) string {
+	switch strings.ToLower(strings.TrimSpace(recipient.Status)) {
+	case "approved":
+		if recipient.Block != nil && recipient.RoomNumber != nil && recipient.BedNumber != nil {
+			return fmt.Sprintf("Your housing application was approved. Your room is %d.%d, bed %d.", *recipient.Block, *recipient.RoomNumber, *recipient.BedNumber)
+		}
+		return "Your housing application was approved. Your room allocation is being finalized."
+	case "rejected":
+		reason := strings.TrimSpace(recipient.RejectedReason)
+		if reason == "" {
+			return "Your housing application was rejected."
+		}
+		return fmt.Sprintf("Your housing application was rejected. Reason: %s", reason)
+	default:
+		return fmt.Sprintf("Your housing application status is %s.", strings.TrimSpace(recipient.Status))
+	}
 }
 
 func listApprovedApplicantsForAllocation(db *sql.DB) ([]allocationApplicant, error) {
