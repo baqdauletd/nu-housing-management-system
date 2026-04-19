@@ -4,6 +4,7 @@ import (
 	"database/sql"
 
 	customAuth "nu-housing-management-system/backend/internal/auth"
+	"nu-housing-management-system/backend/internal/config"
 	"nu-housing-management-system/backend/internal/database"
 	"nu-housing-management-system/backend/internal/handlers"
 
@@ -14,8 +15,10 @@ func RegisterRoutes(
 	r *gin.Engine,
 	db *sql.DB,
 	minioStore *database.MinIOStore,
+	cfg *config.Config,
 ) {
 	r.GET("/documents/:doc_id/download", handlers.DownloadDocument(db, minioStore))
+	r.POST("/payments/stripe/webhook", handlers.HandleStripeWebhook(db, cfg))
 
 	auth := r.Group("/auth")
 	{
@@ -30,6 +33,14 @@ func RegisterRoutes(
 		application.GET("/my", handlers.GetMyApplications(db))
 		application.PATCH("/:id", handlers.UpdateMyApplication(db))
 		application.GET("/:id/status", handlers.GetApplicationStatus(db))
+	}
+
+	payments := r.Group("/payments")
+	payments.Use(customAuth.AuthMiddleware(), customAuth.RoleMiddleware("student"))
+	{
+		payments.GET("/application/:app_id", handlers.GetApplicationPaymentSummary(db, cfg))
+		payments.POST("/application/:app_id/initiate", handlers.InitiateApplicationPayment(db, cfg))
+		payments.POST("/application/:app_id/sync", handlers.SyncStripePayment(db, cfg))
 	}
 
 	documents := r.Group("/documents")

@@ -70,7 +70,7 @@ func main() {
 
 	// register all routes (student, housing, admin)
 	// routes.RegisterRoutes(r, db, redisClient, minioClient)
-	routes.RegisterRoutes(router, db, minioClient)
+	routes.RegisterRoutes(router, db, minioClient, cfg)
 
 	// start server
 	log.Println("Server running on port", cfg.ServerPort)

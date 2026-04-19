@@ -12,7 +12,7 @@ import (
 type Config struct {
 	ServerPort string
 
-	PostgresURL string
+	PostgresURL     string
 	FrontendOrigins []string
 
 	RedisAddr string
@@ -23,6 +23,15 @@ type Config struct {
 	MinioSecretKey      string
 	MinioBucket         string
 	MinioUseSSL         bool
+
+	FrontendBaseURL          string
+	StripeSecretKey          string
+	StripeWebhookSecret      string
+	StripeMerchantName       string
+	StripeProductName        string
+	StripePaymentCurrency    string
+	StripePaymentAmountKZT   int
+	StripePaymentDescription string
 }
 
 func LoadConfig() (*Config, error) {
@@ -38,16 +47,24 @@ func LoadConfig() (*Config, error) {
 	}
 
 	cfg := &Config{
-		ServerPort:         viper.GetString("PORT"),
-		PostgresURL:        viper.GetString("POSTGRES_URL"),
-		FrontendOrigins:    loadFrontendOrigins(),
+		ServerPort:      viper.GetString("PORT"),
+		PostgresURL:     viper.GetString("POSTGRES_URL"),
+		FrontendOrigins: loadFrontendOrigins(),
+		FrontendBaseURL: viper.GetString("FRONTEND_BASE_URL"),
 		// RedisAddr:      viper.GetString("REDIS_ADDR"),
-		MinioEndpoint:       viper.GetString("MINIO_ENDPOINT"),
-		MinioPublicEndpoint: viper.GetString("MINIO_PUBLIC_ENDPOINT"),
-		MinioAccessKey:      viper.GetString("MINIO_ACCESS_KEY"),
-		MinioSecretKey:      viper.GetString("MINIO_SECRET_KEY"),
-		MinioBucket:         viper.GetString("MINIO_BUCKET"),
-		MinioUseSSL:         viper.GetBool("MINIO_USE_SSL"),
+		MinioEndpoint:            viper.GetString("MINIO_ENDPOINT"),
+		MinioPublicEndpoint:      viper.GetString("MINIO_PUBLIC_ENDPOINT"),
+		MinioAccessKey:           viper.GetString("MINIO_ACCESS_KEY"),
+		MinioSecretKey:           viper.GetString("MINIO_SECRET_KEY"),
+		MinioBucket:              viper.GetString("MINIO_BUCKET"),
+		MinioUseSSL:              viper.GetBool("MINIO_USE_SSL"),
+		StripeSecretKey:          viper.GetString("STRIPE_SECRET_KEY"),
+		StripeWebhookSecret:      viper.GetString("STRIPE_WEBHOOK_SECRET"),
+		StripeMerchantName:       viper.GetString("STRIPE_MERCHANT_NAME"),
+		StripeProductName:        viper.GetString("STRIPE_PRODUCT_NAME"),
+		StripePaymentCurrency:    normalizeStripeCurrency(viper.GetString("STRIPE_PAYMENT_CURRENCY")),
+		StripePaymentAmountKZT:   viper.GetInt("STRIPE_PAYMENT_AMOUNT_KZT"),
+		StripePaymentDescription: viper.GetString("STRIPE_PAYMENT_DESCRIPTION"),
 	}
 
 	var missing []string
@@ -56,6 +73,9 @@ func LoadConfig() (*Config, error) {
 	}
 	if cfg.PostgresURL == "" {
 		missing = append(missing, "POSTGRES_URL")
+	}
+	if cfg.FrontendBaseURL == "" {
+		missing = append(missing, "FRONTEND_BASE_URL")
 	}
 	if cfg.MinioEndpoint == "" {
 		missing = append(missing, "MINIO_ENDPOINT")
@@ -106,4 +126,12 @@ func loadFrontendOrigins() []string {
 	}
 
 	return origins
+}
+
+func normalizeStripeCurrency(value string) string {
+	trimmed := strings.ToLower(strings.TrimSpace(value))
+	if trimmed == "" {
+		return "usd"
+	}
+	return trimmed
 }
