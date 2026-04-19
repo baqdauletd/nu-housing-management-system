@@ -909,6 +909,48 @@ func AdminDeleteUser(db *sql.DB) gin.HandlerFunc {
 	}
 }
 
+func AdminUpdateUserRole(db *sql.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		idStr := c.Param("id")
+		id, err := strconv.Atoi(idStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid user id"})
+			return
+		}
+
+		var body struct {
+			Role string `json:"role" binding:"required"`
+		}
+		if err := c.ShouldBindJSON(&body); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid input"})
+			return
+		}
+
+		roleID, err := database.GetRoleIDByName(db, body.Role)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid role"})
+			return
+		}
+
+		user, err := database.GetUserByID(db, id)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+			return
+		}
+		if user.RoleID == roleID {
+			c.JSON(http.StatusOK, gin.H{"status": "unchanged"})
+			return
+		}
+
+		if err := database.UpdateUserRole(db, id, roleID); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "role update failed", "details": err.Error()})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{"status": "updated"})
+	}
+}
+
 func AdminSystemLogs(db *sql.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		logs, err := database.AdminSystemLogs(db)

@@ -84,6 +84,20 @@ func UpdateUser(db *sql.DB, u models.User) error {
 	return err
 }
 
+func UpdateUserRole(db *sql.DB, userID int, roleID int) error {
+	_, err := db.Exec(`
+		UPDATE users
+		SET role_id = $1,
+		    updated_at = NOW()
+		WHERE id = $2
+	`, roleID, userID)
+	if err != nil {
+		return err
+	}
+	db.Exec(`INSERT INTO audit_logs (action, entity, entity_id) VALUES ('update_role', 'user', $1)`, userID)
+	return nil
+}
+
 func DeleteUser(db *sql.DB, userID int) error {
 	_, err := db.Exec(`DELETE FROM users WHERE id = $1`, userID)
 	if err != nil {

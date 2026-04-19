@@ -63,6 +63,7 @@ func RegisterRoutes(
 	{
 		admin.GET("/users", handlers.AdminListUsers(db))
 		admin.POST("/create-user", handlers.AdminCreateUser(db))
+		admin.PATCH("/users/:id/role", handlers.AdminUpdateUserRole(db))
 		admin.DELETE("/users/:id", handlers.AdminDeleteUser(db))
 		admin.GET("/logs", handlers.AdminSystemLogs(db))
 		admin.GET("/stats", handlers.AdminStats(db))
