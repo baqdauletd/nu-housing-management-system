@@ -63,7 +63,7 @@ func RegisterRoutes(
 		housing.GET("/applications", handlers.HousingListApplications(db))
 		housing.GET("/applications/:id", handlers.HousingGetApplication(db))
 		housing.GET("/dorm-inventory", handlers.HousingDormInventory(db))
-		housing.PATCH("/applications/:id/approve", handlers.HousingApprove(db))
+		housing.PATCH("/applications/:id/approve", handlers.HousingApprove(db, cfg))
 		housing.PATCH("/applications/:id/reject", handlers.HousingReject(db))
 		housing.GET("/settings", handlers.GetSystemSettings(db))
 		housing.PATCH("/settings", handlers.UpdateSystemSettings(db, cfg))

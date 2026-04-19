@@ -29,7 +29,8 @@ func (s EmailSender) Configured() bool {
 	}
 	return strings.TrimSpace(s.cfg.SMTPHost) != "" &&
 		s.cfg.SMTPPort > 0 &&
-		strings.TrimSpace(s.cfg.SMTPFrom) != ""
+		strings.TrimSpace(s.cfg.SMTPFrom) != "" &&
+		len(s.cfg.SMTPAllowedRecipients) > 0
 }
 
 func (s EmailSender) Send(message EmailMessage) error {
@@ -40,6 +41,9 @@ func (s EmailSender) Send(message EmailMessage) error {
 	from := strings.TrimSpace(s.cfg.SMTPFrom)
 	to := strings.TrimSpace(message.To)
 	if to == "" {
+		return nil
+	}
+	if !s.cfg.IsEmailRecipientAllowed(to) {
 		return nil
 	}
 

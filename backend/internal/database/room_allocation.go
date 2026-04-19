@@ -54,6 +54,58 @@ type ApplicationNotificationRecipient struct {
 	BedNumber      *int
 }
 
+func GetApplicationNotificationRecipient(db *sql.DB, applicationID int) (ApplicationNotificationRecipient, error) {
+	var recipient ApplicationNotificationRecipient
+	var block, roomNumber, bedNumber sql.NullInt64
+
+	err := db.QueryRow(`
+		SELECT
+			a.id,
+			a.student_id,
+			u.email,
+			COALESCE(NULLIF(a.student_number, ''), u.nu_id),
+			COALESCE(NULLIF(a.name_surname, ''), NULLIF(a.fio, ''), u.email),
+			COALESCE(a.status, ''),
+			COALESCE(a.rejected_reason, ''),
+			ra.block,
+			ra.room_number,
+			ra.bed_number
+		FROM applications a
+		JOIN users u ON u.id = a.student_id
+		LEFT JOIN room_allocations ra ON ra.application_id = a.id
+		WHERE a.id = $1
+	`, applicationID).Scan(
+		&recipient.ApplicationID,
+		&recipient.StudentID,
+		&recipient.Email,
+		&recipient.StudentNumber,
+		&recipient.DisplayName,
+		&recipient.Status,
+		&recipient.RejectedReason,
+		&block,
+		&roomNumber,
+		&bedNumber,
+	)
+	if err != nil {
+		return recipient, err
+	}
+
+	if block.Valid {
+		value := int(block.Int64)
+		recipient.Block = &value
+	}
+	if roomNumber.Valid {
+		value := int(roomNumber.Int64)
+		recipient.RoomNumber = &value
+	}
+	if bedNumber.Valid {
+		value := int(bedNumber.Int64)
+		recipient.BedNumber = &value
+	}
+
+	return recipient, nil
+}
+
 func RunRoomAllocation(db *sql.DB) error {
 	if err := ensureRoomAllocationSchema(db); err != nil {
 		return err

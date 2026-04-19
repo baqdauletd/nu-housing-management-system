@@ -915,7 +915,7 @@ func HousingDormInventory(db *sql.DB) gin.HandlerFunc {
 	}
 }
 
-func HousingApprove(db *sql.DB) gin.HandlerFunc {
+func HousingApprove(db *sql.DB, cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		idStr := c.Param("id")
 		id, _ := strconv.Atoi(idStr)
@@ -930,7 +930,33 @@ func HousingApprove(db *sql.DB) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "approve failed", "details": err.Error()})
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"status": "approved"})
+
+		emailSent := false
+		emailSkipped := false
+		if cfg != nil {
+			recipient, err := database.GetApplicationNotificationRecipient(db, id)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "application approved but notification recipient could not be loaded", "details": err.Error()})
+				return
+			}
+
+			sender := notifications.NewEmailSender(cfg)
+			if !sender.Configured() {
+				emailSkipped = true
+			} else {
+				message := buildApprovedApplicationPaymentEmail(cfg, recipient)
+				if strings.TrimSpace(message.To) == "" {
+					emailSkipped = true
+				} else if err := sender.Send(message); err != nil {
+					c.JSON(http.StatusInternalServerError, gin.H{"error": "application approved but approval email could not be sent", "details": err.Error()})
+					return
+				} else {
+					emailSent = true
+				}
+			}
+		}
+
+		c.JSON(http.StatusOK, gin.H{"status": "approved", "email_sent": emailSent, "email_skipped": emailSkipped})
 	}
 }
 
@@ -1700,6 +1726,32 @@ func buildApplicationClosureEmail(recipient database.ApplicationNotificationReci
 	return notifications.EmailMessage{
 		To:      strings.TrimSpace(recipient.Email),
 		Subject: "NU Housing application result",
+		Body:    body,
+	}
+}
+
+func buildApprovedApplicationPaymentEmail(cfg *config.Config, recipient database.ApplicationNotificationRecipient) notifications.EmailMessage {
+	name := strings.TrimSpace(recipient.DisplayName)
+	if name == "" {
+		name = "Student"
+	}
+
+	paymentURL := fmt.Sprintf(
+		"%s/dashboard/student/payment?applicationId=%d",
+		strings.TrimRight(cfg.FrontendBaseURL, "/"),
+		recipient.ApplicationID,
+	)
+
+	body := fmt.Sprintf(
+		"Dear %s,\n\nYour housing application has been approved.\n\nTo confirm your place, please complete the housing payment using the link below:\n%s\n\nIf the payment page does not open directly, sign in to the NU Housing portal and open the Payment section for application #%d.\n\nRegards,\nNU Housing",
+		name,
+		paymentURL,
+		recipient.ApplicationID,
+	)
+
+	return notifications.EmailMessage{
+		To:      strings.TrimSpace(recipient.Email),
+		Subject: "NU Housing application approved: payment required",
 		Body:    body,
 	}
 }

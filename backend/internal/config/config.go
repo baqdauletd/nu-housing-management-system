@@ -33,11 +33,12 @@ type Config struct {
 	StripePaymentAmountKZT   int
 	StripePaymentDescription string
 
-	SMTPHost     string
-	SMTPPort     int
-	SMTPUsername string
-	SMTPPassword string
-	SMTPFrom     string
+	SMTPHost              string
+	SMTPPort              int
+	SMTPUsername          string
+	SMTPPassword          string
+	SMTPFrom              string
+	SMTPAllowedRecipients map[string]struct{}
 }
 
 func LoadConfig() (*Config, error) {
@@ -76,6 +77,7 @@ func LoadConfig() (*Config, error) {
 		SMTPUsername:             viper.GetString("SMTP_USERNAME"),
 		SMTPPassword:             viper.GetString("SMTP_PASSWORD"),
 		SMTPFrom:                 viper.GetString("SMTP_FROM"),
+		SMTPAllowedRecipients:    loadAllowedEmails("SMTP_ALLOWED_RECIPIENTS"),
 	}
 
 	var missing []string
@@ -145,4 +147,36 @@ func normalizeStripeCurrency(value string) string {
 		return "usd"
 	}
 	return trimmed
+}
+
+func loadAllowedEmails(key string) map[string]struct{} {
+	raw := strings.TrimSpace(viper.GetString(key))
+	allowed := make(map[string]struct{})
+	if raw == "" {
+		return allowed
+	}
+
+	for _, part := range strings.Split(raw, ",") {
+		email := strings.ToLower(strings.TrimSpace(part))
+		if email == "" {
+			continue
+		}
+		allowed[email] = struct{}{}
+	}
+
+	return allowed
+}
+
+func (c *Config) IsEmailRecipientAllowed(email string) bool {
+	if c == nil {
+		return false
+	}
+
+	normalized := strings.ToLower(strings.TrimSpace(email))
+	if normalized == "" {
+		return false
+	}
+
+	_, ok := c.SMTPAllowedRecipients[normalized]
+	return ok
 }
