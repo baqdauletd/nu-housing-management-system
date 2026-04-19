@@ -21,6 +21,8 @@ type Application struct {
 	RoomPreference  string     `json:"room_preference,omitempty"`
 	AdditionalInfo  string     `json:"additional_info,omitempty"`
 	Status          string     `json:"status"`
+	PaymentStatus   *string    `json:"payment_status,omitempty"`
+	PaidAt          *time.Time `json:"paid_at,omitempty"`
 	SubmittedAt     time.Time  `json:"submitted_at"`
 	UpdatedAt       time.Time  `json:"updated_at"`
 	RejectedReason  *string    `json:"rejected_reason,omitempty"`

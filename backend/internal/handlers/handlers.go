@@ -1296,6 +1296,7 @@ func buildBasicApplicationPayloadWithRoom(app models.Application, reviewDetailsE
 		}
 	}
 	identity := applicationIdentityPayload(app)
+	isPaid := app.PaymentStatus != nil && strings.EqualFold(strings.TrimSpace(*app.PaymentStatus), "paid")
 	return gin.H{
 		"id":                    app.ID,
 		"application_id":        app.ID,
@@ -1339,6 +1340,10 @@ func buildBasicApplicationPayloadWithRoom(app models.Application, reviewDetailsE
 		"additional_info":       app.AdditionalInfo,
 		"status":                app.Status,
 		"is_approved":           strings.EqualFold(strings.TrimSpace(app.Status), "approved"),
+		"is_paid":               isPaid,
+		"paid":                  isPaid,
+		"payment_status":        app.PaymentStatus,
+		"paid_at":               app.PaidAt,
 		"submitted_at":          app.SubmittedAt,
 		"updated_at":            app.UpdatedAt,
 		"rejected_reason":       app.RejectedReason,

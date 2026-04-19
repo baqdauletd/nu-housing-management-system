@@ -33,7 +33,6 @@ prepared AS (
         first_kk,
         last_kk,
         lower(first_en || '.' || last_en || '@nu.edu.kz') AS email,
-        (2019 + ((n - 1) % 6))::text || lpad(((n * 7919 + 104729) % 100000)::text, 5, '0') AS nu_id,
         '+7701' || lpad((3000000 + n * 137)::text, 7, '0') AS phone,
         CASE WHEN n <= 70 THEN 'approved' ELSE 'rejected' END AS status,
         CASE WHEN n <= 70 THEN NULL ELSE 'Rejected test application' END AS rejected_reason,
@@ -50,6 +49,31 @@ prepared AS (
         'N' || lpad(n::text, 7, '0') AS passport_number
     FROM seed
 ),
+available_seed_nu_ids AS (
+    SELECT
+        row_number() OVER (ORDER BY candidate.nu_id) AS n,
+        candidate.nu_id
+    FROM (
+        SELECT '99' || lpad(gs::text, 7, '0') AS nu_id
+        FROM generate_series(1, 10000) AS gs
+    ) AS candidate
+    WHERE NOT EXISTS (
+        SELECT 1
+        FROM users u
+        WHERE u.nu_id = candidate.nu_id
+    )
+    LIMIT 100
+),
+prepared_with_nu_ids AS (
+    SELECT
+        p.*,
+        COALESCE(existing_user.nu_id, available.nu_id) AS nu_id
+    FROM prepared p
+    LEFT JOIN users existing_user
+        ON existing_user.email = p.email
+    LEFT JOIN available_seed_nu_ids available
+        ON available.n = p.n
+),
 upserted_users AS (
     INSERT INTO users (nu_id, email, password_hash, role_id, phone, created_at, updated_at)
     SELECT
@@ -60,11 +84,10 @@ upserted_users AS (
         p.phone,
         NOW(),
         NOW()
-    FROM prepared p
+    FROM prepared_with_nu_ids p
     CROSS JOIN student_role sr
     ON CONFLICT (email) DO UPDATE
     SET
-        nu_id = EXCLUDED.nu_id,
         phone = EXCLUDED.phone,
         role_id = EXCLUDED.role_id,
         updated_at = NOW()
@@ -74,7 +97,7 @@ prepared_with_users AS (
     SELECT
         p.*,
         uu.id AS user_id
-    FROM prepared p
+    FROM prepared_with_nu_ids p
     JOIN upserted_users uu ON uu.email = p.email
 ),
 paired AS (

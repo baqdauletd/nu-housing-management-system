@@ -17,11 +17,20 @@ type HousingApplicationFilters struct {
 
 func HousingListApplications(db *sql.DB, filters HousingApplicationFilters) ([]models.Application, error) {
 	baseQuery := `
-      SELECT id, student_id, COALESCE(student_number, ''), COALESCE(name_surname, ''), COALESCE(fio, ''), birth_date,
-             COALESCE(iin, ''), COALESCE(school, ''), COALESCE(level, ''), COALESCE(comments, ''),
-             year, major, gender, COALESCE(room_preference, ''), COALESCE(additional_info, ''),
-             COALESCE(applicant_type, 'local'), COALESCE(passport_number, ''), status, submitted_at, updated_at, rejected_reason, reviewed_by, review_timestamp
-      FROM applications
+      SELECT a.id, a.student_id, COALESCE(a.student_number, ''), COALESCE(a.name_surname, ''), COALESCE(a.fio, ''), a.birth_date,
+             COALESCE(a.iin, ''), COALESCE(a.school, ''), COALESCE(a.level, ''), COALESCE(a.comments, ''),
+             a.year, a.major, a.gender, COALESCE(a.room_preference, ''), COALESCE(a.additional_info, ''),
+             COALESCE(a.applicant_type, 'local'), COALESCE(a.passport_number, ''), a.status,
+             latest_payment.status, latest_payment.paid_at,
+             a.submitted_at, a.updated_at, a.rejected_reason, a.reviewed_by, a.review_timestamp
+      FROM applications a
+      LEFT JOIN LATERAL (
+          SELECT p.status, p.paid_at
+          FROM payments p
+          WHERE p.application_id = a.id
+          ORDER BY p.created_at DESC, p.id DESC
+          LIMIT 1
+      ) latest_payment ON TRUE
    `
 
 	var conditions []string
@@ -29,38 +38,38 @@ func HousingListApplications(db *sql.DB, filters HousingApplicationFilters) ([]m
 	argIndex := 1
 
 	if status := strings.TrimSpace(filters.Status); status != "" {
-		conditions = append(conditions, fmt.Sprintf("status = $%d", argIndex))
+		conditions = append(conditions, fmt.Sprintf("a.status = $%d", argIndex))
 		args = append(args, status)
 		argIndex++
 	}
 
 	if filters.Year != nil {
-		conditions = append(conditions, fmt.Sprintf("year = $%d", argIndex))
+		conditions = append(conditions, fmt.Sprintf("a.year = $%d", argIndex))
 		args = append(args, *filters.Year)
 		argIndex++
 	}
 
 	if gender := strings.TrimSpace(filters.Gender); gender != "" {
-		conditions = append(conditions, fmt.Sprintf("LOWER(gender) = LOWER($%d)", argIndex))
+		conditions = append(conditions, fmt.Sprintf("LOWER(a.gender) = LOWER($%d)", argIndex))
 		args = append(args, gender)
 		argIndex++
 	}
 
 	if major := strings.TrimSpace(filters.Major); major != "" {
-		conditions = append(conditions, fmt.Sprintf("major ILIKE $%d", argIndex))
+		conditions = append(conditions, fmt.Sprintf("a.major ILIKE $%d", argIndex))
 		args = append(args, "%"+major+"%")
 		argIndex++
 	}
 
 	if search := strings.TrimSpace(filters.Search); search != "" {
 		conditions = append(conditions, fmt.Sprintf(`(
-			CAST(student_id AS TEXT) ILIKE $%d OR
-			CAST(id AS TEXT) ILIKE $%d OR
-			COALESCE(fio, '') ILIKE $%d OR
-			COALESCE(name_surname, '') ILIKE $%d OR
-			COALESCE(student_number, '') ILIKE $%d OR
-			COALESCE(additional_info, '') ILIKE $%d OR
-			major ILIKE $%d
+			CAST(a.student_id AS TEXT) ILIKE $%d OR
+			CAST(a.id AS TEXT) ILIKE $%d OR
+			COALESCE(a.fio, '') ILIKE $%d OR
+			COALESCE(a.name_surname, '') ILIKE $%d OR
+			COALESCE(a.student_number, '') ILIKE $%d OR
+			COALESCE(a.additional_info, '') ILIKE $%d OR
+			a.major ILIKE $%d
 		)`, argIndex, argIndex, argIndex, argIndex, argIndex, argIndex, argIndex))
 		args = append(args, "%"+search+"%")
 		argIndex++
@@ -70,7 +79,7 @@ func HousingListApplications(db *sql.DB, filters HousingApplicationFilters) ([]m
 	if len(conditions) > 0 {
 		query += "\nWHERE " + strings.Join(conditions, "\n  AND ")
 	}
-	query += "\nORDER BY submitted_at DESC"
+	query += "\nORDER BY a.submitted_at DESC"
 
 	rows, err := db.Query(query, args...)
 	if err != nil {
@@ -101,6 +110,8 @@ func HousingListApplications(db *sql.DB, filters HousingApplicationFilters) ([]m
 			&a.ApplicantType,
 			&a.PassportNumber,
 			&a.Status,
+			&a.PaymentStatus,
+			&a.PaidAt,
 			&a.SubmittedAt,
 			&a.UpdatedAt,
 			&a.RejectedReason,

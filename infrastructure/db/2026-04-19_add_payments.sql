@@ -23,3 +23,4 @@ CREATE TABLE payments (
 CREATE INDEX idx_payments_application_id ON payments(application_id);
 CREATE INDEX idx_payments_student_id ON payments(student_id);
 CREATE INDEX idx_payments_status ON payments(status);
+CREATE INDEX idx_payments_application_created_at ON payments(application_id, created_at DESC, id DESC);

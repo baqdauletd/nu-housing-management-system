@@ -185,13 +185,22 @@ func GetApplicationByID(db *sql.DB, id int) (models.Application, error) {
 
 func GetApplicationsByStudent(db *sql.DB, studentID int) ([]models.Application, error) {
 	query := `
-		SELECT id, student_id, COALESCE(student_number, ''), COALESCE(name_surname, ''), COALESCE(fio, ''), birth_date,
-		       COALESCE(iin, ''), COALESCE(school, ''), COALESCE(level, ''), COALESCE(comments, ''),
-		       year, major, gender, COALESCE(room_preference, ''), COALESCE(additional_info, ''),
-		       COALESCE(applicant_type, 'local'), COALESCE(passport_number, ''), status, submitted_at, updated_at, rejected_reason, reviewed_by, review_timestamp
-		FROM applications
-		WHERE student_id = $1
-		ORDER BY submitted_at DESC
+		SELECT a.id, a.student_id, COALESCE(a.student_number, ''), COALESCE(a.name_surname, ''), COALESCE(a.fio, ''), a.birth_date,
+		       COALESCE(a.iin, ''), COALESCE(a.school, ''), COALESCE(a.level, ''), COALESCE(a.comments, ''),
+		       a.year, a.major, a.gender, COALESCE(a.room_preference, ''), COALESCE(a.additional_info, ''),
+		       COALESCE(a.applicant_type, 'local'), COALESCE(a.passport_number, ''), a.status,
+		       latest_payment.status, latest_payment.paid_at,
+		       a.submitted_at, a.updated_at, a.rejected_reason, a.reviewed_by, a.review_timestamp
+		FROM applications a
+		LEFT JOIN LATERAL (
+			SELECT p.status, p.paid_at
+			FROM payments p
+			WHERE p.application_id = a.id
+			ORDER BY p.created_at DESC, p.id DESC
+			LIMIT 1
+		) latest_payment ON TRUE
+		WHERE a.student_id = $1
+		ORDER BY a.submitted_at DESC
 	`
 
 	rows, err := db.Query(query, studentID)
@@ -222,6 +231,8 @@ func GetApplicationsByStudent(db *sql.DB, studentID int) ([]models.Application, 
 			&a.ApplicantType,
 			&a.PassportNumber,
 			&a.Status,
+			&a.PaymentStatus,
+			&a.PaidAt,
 			&a.SubmittedAt,
 			&a.UpdatedAt,
 			&a.RejectedReason,
