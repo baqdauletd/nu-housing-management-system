@@ -281,7 +281,7 @@ func GetMyApplications(db *sql.DB) gin.HandlerFunc {
 		}
 		response := make([]gin.H, 0, len(apps))
 		for _, app := range apps {
-			response = append(response, buildBasicApplicationPayload(app, ""))
+			response = append(response, buildBasicApplicationPayload(db, app, ""))
 		}
 		c.JSON(http.StatusOK, response)
 	}
@@ -401,6 +401,7 @@ func UpdateSystemSettings(db *sql.DB) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load current settings", "details": err.Error()})
 			return
 		}
+		wasApplicationsEnabled := settings.ApplicationsEnabled
 
 		if body.ApplicationsEnabled != nil {
 			settings.ApplicationsEnabled = *body.ApplicationsEnabled
@@ -440,6 +441,12 @@ func UpdateSystemSettings(db *sql.DB) gin.HandlerFunc {
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update system settings", "details": err.Error()})
 			return
+		}
+		if wasApplicationsEnabled && !settings.ApplicationsEnabled {
+			if err := database.RunRoomAllocation(db); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "applications were closed but room allocation failed", "details": err.Error()})
+				return
+			}
 		}
 
 		if userID, _, ok := requestIdentity(c); ok {
@@ -724,7 +731,7 @@ func HousingListApplications(db *sql.DB) gin.HandlerFunc {
 		}
 		response := make([]gin.H, 0, len(apps))
 		for _, app := range apps {
-			response = append(response, buildBasicApplicationPayload(app, ""))
+			response = append(response, buildBasicApplicationPayload(db, app, ""))
 		}
 		c.JSON(http.StatusOK, response)
 	}
@@ -741,10 +748,55 @@ func HousingGetApplication(db *sql.DB) gin.HandlerFunc {
 		}
 		payload, err := buildApplicationReviewPayload(db, app)
 		if err != nil {
-			c.JSON(http.StatusOK, buildBasicApplicationPayload(app, err.Error()))
+			c.JSON(http.StatusOK, buildBasicApplicationPayload(db, app, err.Error()))
 			return
 		}
 		c.JSON(http.StatusOK, payload)
+	}
+}
+
+func HousingDormInventory(db *sql.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var blockFilter *int
+		if rawBlock := strings.TrimSpace(c.Query("block")); rawBlock != "" {
+			parsed, err := strconv.Atoi(rawBlock)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid block"})
+				return
+			}
+			blockFilter = &parsed
+		}
+
+		var roomFilter *int
+		if rawRoom := strings.TrimSpace(c.Query("room")); rawRoom != "" {
+			parsed, err := strconv.Atoi(rawRoom)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid room"})
+				return
+			}
+			roomFilter = &parsed
+		}
+
+		search := strings.TrimSpace(c.Query("search"))
+		if search == "" {
+			search = strings.TrimSpace(c.Query("q"))
+		}
+
+		rows, err := database.ListDormInventory(db, database.DormInventoryFilters{
+			Block:  blockFilter,
+			Room:   roomFilter,
+			Gender: strings.TrimSpace(c.Query("gender")),
+			Major:  strings.TrimSpace(c.Query("major")),
+			Search: search,
+		})
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list dorm inventory", "details": err.Error()})
+			return
+		}
+		if rows == nil {
+			rows = []models.DormInventoryRow{}
+		}
+		c.JSON(http.StatusOK, rows)
 	}
 }
 
@@ -975,6 +1027,7 @@ func buildApplicationReviewPayload(db *sql.DB, app models.Application) (gin.H, e
 	if err != nil {
 		return nil, err
 	}
+	roomAllocation := lookupRoomAllocationPayload(db, app.ID)
 
 	manualReviewReasons := make([]string, 0)
 	reviewReasons := make([]string, 0)
@@ -1034,11 +1087,12 @@ func buildApplicationReviewPayload(db *sql.DB, app models.Application) (gin.H, e
 		"manual_review_reasons": manualReviewReasons,
 		"review_reasons":        reviewReasons,
 		"problematic_documents": problematicDocuments,
+		"room_allocation":       roomAllocation,
 		"editable_details":      extractEditableApplicationDetails(app.AdditionalInfo),
 	}, nil
 }
 
-func buildBasicApplicationPayload(app models.Application, reviewDetailsError string) gin.H {
+func buildBasicApplicationPayload(db *sql.DB, app models.Application, reviewDetailsError string) gin.H {
 	manualReviewReasons := []string{}
 	reviewReasons := []string{}
 	if app.DecisionReason != nil && strings.TrimSpace(*app.DecisionReason) != "" {
@@ -1047,6 +1101,7 @@ func buildBasicApplicationPayload(app models.Application, reviewDetailsError str
 			manualReviewReasons = append(manualReviewReasons, strings.TrimSpace(*app.DecisionReason))
 		}
 	}
+	roomAllocation := lookupRoomAllocationPayload(db, app.ID)
 	return gin.H{
 		"id":                    app.ID,
 		"student_id":            app.StudentID,
@@ -1068,8 +1123,28 @@ func buildBasicApplicationPayload(app models.Application, reviewDetailsError str
 		"manual_review_reasons": manualReviewReasons,
 		"review_reasons":        reviewReasons,
 		"problematic_documents": []gin.H{},
+		"room_allocation":       roomAllocation,
 		"editable_details":      extractEditableApplicationDetails(app.AdditionalInfo),
 		"review_details_error":  reviewDetailsError,
+	}
+}
+
+func lookupRoomAllocationPayload(db *sql.DB, applicationID int) gin.H {
+	if db == nil {
+		return nil
+	}
+	allocation, err := database.GetRoomAllocationByApplicationID(db, applicationID)
+	if err != nil {
+		return nil
+	}
+	return gin.H{
+		"id":             allocation.ID,
+		"application_id": allocation.ApplicationID,
+		"student_id":     allocation.StudentID,
+		"block":          allocation.Block,
+		"room_number":    allocation.RoomNumber,
+		"bed_number":     allocation.BedNumber,
+		"created_at":     allocation.CreatedAt,
 	}
 }
 
