@@ -283,8 +283,8 @@ func GetMyApplications(db *sql.DB) gin.HandlerFunc {
 		for _, app := range apps {
 			payload, err := buildApplicationReviewPayload(db, app)
 			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch application review details", "details": err.Error()})
-				return
+				response = append(response, buildBasicApplicationPayload(app, err.Error()))
+				continue
 			}
 			response = append(response, payload)
 		}
@@ -721,12 +721,7 @@ func HousingListApplications(db *sql.DB) gin.HandlerFunc {
 		}
 		response := make([]gin.H, 0, len(apps))
 		for _, app := range apps {
-			payload, err := buildApplicationReviewPayload(db, app)
-			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch application review details", "details": err.Error()})
-				return
-			}
-			response = append(response, payload)
+			response = append(response, buildBasicApplicationPayload(app, ""))
 		}
 		c.JSON(http.StatusOK, response)
 	}
@@ -743,7 +738,7 @@ func HousingGetApplication(db *sql.DB) gin.HandlerFunc {
 		}
 		payload, err := buildApplicationReviewPayload(db, app)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch application review details", "details": err.Error()})
+			c.JSON(http.StatusOK, buildBasicApplicationPayload(app, err.Error()))
 			return
 		}
 		c.JSON(http.StatusOK, payload)
@@ -1036,6 +1031,31 @@ func buildApplicationReviewPayload(db *sql.DB, app models.Application) (gin.H, e
 		"problematic_documents": problematicDocuments,
 		"editable_details":      extractEditableApplicationDetails(app.AdditionalInfo),
 	}, nil
+}
+
+func buildBasicApplicationPayload(app models.Application, reviewDetailsError string) gin.H {
+	return gin.H{
+		"id":                    app.ID,
+		"student_id":            app.StudentID,
+		"fio":                   app.FIO,
+		"year":                  app.Year,
+		"major":                 app.Major,
+		"gender":                app.Gender,
+		"room_preference":       app.RoomPreference,
+		"additional_info":       app.AdditionalInfo,
+		"status":                app.Status,
+		"submitted_at":          app.SubmittedAt,
+		"updated_at":            app.UpdatedAt,
+		"rejected_reason":       app.RejectedReason,
+		"decision_reason":       app.DecisionReason,
+		"reviewed_by":           app.ReviewedBy,
+		"review_timestamp":      app.ReviewTimestamp,
+		"manual_review_reasons": []string{},
+		"review_reasons":        []string{},
+		"problematic_documents": []gin.H{},
+		"editable_details":      extractEditableApplicationDetails(app.AdditionalInfo),
+		"review_details_error":  reviewDetailsError,
+	}
 }
 
 func mergeEditableApplicationDetails(additionalInfo string, apartmentInAstana, parentsWorkInAstana, astanaResident *bool, preferredRoommate *string) string {

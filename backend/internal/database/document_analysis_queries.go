@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 
 	"nu-housing-management-system/backend/internal/analysis"
@@ -166,7 +167,7 @@ func scanDocumentAnalysisRow(scanner rowScanner) (models.DocumentAnalysis, error
 		return analysisRow, err
 	}
 	if len(issuesJSON) > 0 {
-		if err := json.Unmarshal(issuesJSON, &analysisRow.Issues); err != nil {
+		if err := unmarshalIssues(issuesJSON, &analysisRow.Issues); err != nil {
 			return analysisRow, err
 		}
 	}
@@ -174,4 +175,26 @@ func scanDocumentAnalysisRow(scanner rowScanner) (models.DocumentAnalysis, error
 		analysisRow.Issues = []string{}
 	}
 	return analysisRow, nil
+}
+
+func unmarshalIssues(raw []byte, target *[]string) error {
+	var direct []string
+	if err := json.Unmarshal(raw, &direct); err == nil {
+		*target = direct
+		return nil
+	}
+
+	var generic []any
+	if err := json.Unmarshal(raw, &generic); err != nil {
+		return fmt.Errorf("decode issues json: %w", err)
+	}
+
+	issues := make([]string, 0, len(generic))
+	for _, item := range generic {
+		if str, ok := item.(string); ok {
+			issues = append(issues, str)
+		}
+	}
+	*target = issues
+	return nil
 }
