@@ -1101,7 +1101,6 @@ func buildBasicApplicationPayload(db *sql.DB, app models.Application, reviewDeta
 			manualReviewReasons = append(manualReviewReasons, strings.TrimSpace(*app.DecisionReason))
 		}
 	}
-	roomAllocation := lookupRoomAllocationPayload(db, app.ID)
 	return gin.H{
 		"id":                    app.ID,
 		"student_id":            app.StudentID,
@@ -1123,7 +1122,7 @@ func buildBasicApplicationPayload(db *sql.DB, app models.Application, reviewDeta
 		"manual_review_reasons": manualReviewReasons,
 		"review_reasons":        reviewReasons,
 		"problematic_documents": []gin.H{},
-		"room_allocation":       roomAllocation,
+		"room_allocation":       nil,
 		"editable_details":      extractEditableApplicationDetails(app.AdditionalInfo),
 		"review_details_error":  reviewDetailsError,
 	}
