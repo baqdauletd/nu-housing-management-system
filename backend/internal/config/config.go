@@ -59,10 +59,10 @@ func LoadConfig() (*Config, error) {
 		FrontendOrigins: loadFrontendOrigins(),
 		FrontendBaseURL: viper.GetString("FRONTEND_BASE_URL"),
 		// RedisAddr:      viper.GetString("REDIS_ADDR"),
-		MinioEndpoint:            viper.GetString("MINIO_ENDPOINT"),
+		MinioEndpoint:            firstNonEmpty(viper.GetString("MINIO_ENDPOINT"), viper.GetString("MINIO_PRIVATE_ENDPOINT")),
 		MinioPublicEndpoint:      viper.GetString("MINIO_PUBLIC_ENDPOINT"),
-		MinioAccessKey:           viper.GetString("MINIO_ACCESS_KEY"),
-		MinioSecretKey:           viper.GetString("MINIO_SECRET_KEY"),
+		MinioAccessKey:           firstNonEmpty(viper.GetString("MINIO_ACCESS_KEY"), viper.GetString("MINIO_ROOT_USER")),
+		MinioSecretKey:           firstNonEmpty(viper.GetString("MINIO_SECRET_KEY"), viper.GetString("MINIO_ROOT_PASSWORD")),
 		MinioBucket:              viper.GetString("MINIO_BUCKET"),
 		MinioUseSSL:              viper.GetBool("MINIO_USE_SSL"),
 		StripeSecretKey:          viper.GetString("STRIPE_SECRET_KEY"),
@@ -139,6 +139,16 @@ func loadFrontendOrigins() []string {
 	}
 
 	return origins
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func normalizeStripeCurrency(value string) string {
