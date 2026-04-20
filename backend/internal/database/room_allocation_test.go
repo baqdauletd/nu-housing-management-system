@@ -68,3 +68,24 @@ func TestAllocateApplicantsUsesNUFYPBlocksForNUFYPStudents(t *testing.T) {
 		t.Fatalf("NUFYP student allocated to block %d, want 11/19/20", block)
 	}
 }
+
+func TestAllocateApplicantsUsesFreeBedWhenExistingBedsHaveGap(t *testing.T) {
+	assignments, err := allocateApplicants([]allocationApplicant{
+		{ApplicationID: 1, StudentID: 101, Gender: "female", Major: "CS"},
+	}, map[string]roomOccupancy{
+		roomKey(22, 201): {
+			Gender: "female",
+			Count:  1,
+			Beds:   map[int]bool{2: true},
+		},
+	})
+	if err != nil {
+		t.Fatalf("allocateApplicants returned error: %v", err)
+	}
+	if len(assignments) != 1 {
+		t.Fatalf("assignments len = %d, want 1", len(assignments))
+	}
+	if assignments[0].Block != 22 || assignments[0].RoomNumber != 201 || assignments[0].BedNumber != 1 {
+		t.Fatalf("assignment = %+v, want block 22 room 201 bed 1", assignments[0])
+	}
+}

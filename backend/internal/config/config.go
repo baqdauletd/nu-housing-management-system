@@ -186,6 +186,9 @@ func (c *Config) IsEmailRecipientAllowed(email string) bool {
 	if normalized == "" {
 		return false
 	}
+	if len(c.SMTPAllowedRecipients) == 0 {
+		return true
+	}
 
 	_, ok := c.SMTPAllowedRecipients[normalized]
 	return ok

@@ -31,7 +31,7 @@ func RegisterRoutes(
 	{
 		application.POST("/submit", handlers.SubmitApplication(db))
 		application.GET("/my", handlers.GetMyApplications(db))
-		application.PATCH("/:id", handlers.UpdateMyApplication(db))
+		application.PATCH("/:id", handlers.UpdateMyApplication(db, minioStore))
 		application.GET("/:id/status", handlers.GetApplicationStatus(db))
 	}
 
@@ -63,8 +63,9 @@ func RegisterRoutes(
 		housing.GET("/applications", handlers.HousingListApplications(db))
 		housing.GET("/applications/:id", handlers.HousingGetApplication(db))
 		housing.GET("/dorm-inventory", handlers.HousingDormInventory(db))
-		housing.PATCH("/applications/:id/approve", handlers.HousingApprove(db, cfg))
+		housing.PATCH("/applications/:id/approve", handlers.HousingApprove(db))
 		housing.PATCH("/applications/:id/reject", handlers.HousingReject(db))
+		housing.POST("/notify-rejected", handlers.HousingNotifyRejected(db, cfg))
 		housing.GET("/settings", handlers.GetSystemSettings(db))
 		housing.PATCH("/settings", handlers.UpdateSystemSettings(db, cfg))
 	}
