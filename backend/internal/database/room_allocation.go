@@ -31,6 +31,7 @@ type roomSlot struct {
 type roomOccupancy struct {
 	Gender string
 	Count  int
+	Beds   map[int]bool
 }
 
 type pendingAllocation struct {
@@ -52,6 +53,13 @@ type ApplicationNotificationRecipient struct {
 	Block          *int
 	RoomNumber     *int
 	BedNumber      *int
+}
+
+type StudentNotificationRecipient struct {
+	StudentID     int
+	Email         string
+	StudentNumber string
+	DisplayName   string
 }
 
 func GetApplicationNotificationRecipient(db *sql.DB, applicationID int) (ApplicationNotificationRecipient, error) {
@@ -168,6 +176,8 @@ func ensureRoomAllocationSchema(db *sql.DB) error {
 		`,
 		`CREATE INDEX IF NOT EXISTS idx_room_allocations_student_id ON room_allocations(student_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_room_allocations_room ON room_allocations(block, room_number)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_room_allocations_application_id_unique ON room_allocations(application_id)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_room_allocations_bed_unique ON room_allocations(block, room_number, bed_number)`,
 		`ALTER TABLE room_allocations ADD COLUMN IF NOT EXISTS ends_at TIMESTAMP NULL`,
 	}
 
@@ -412,6 +422,45 @@ func ListApplicationNotificationRecipients(db *sql.DB) ([]ApplicationNotificatio
 	return recipients, rows.Err()
 }
 
+func ListRejectedApplicationEditRecipients(db *sql.DB) ([]ApplicationNotificationRecipient, error) {
+	rows, err := db.Query(`
+		SELECT
+			a.id,
+			a.student_id,
+			u.email,
+			COALESCE(NULLIF(a.student_number, ''), u.nu_id),
+			COALESCE(NULLIF(a.name_surname, ''), NULLIF(a.fio, ''), u.email),
+			COALESCE(a.status, ''),
+			COALESCE(a.rejected_reason, '')
+		FROM applications a
+		JOIN users u ON u.id = a.student_id
+		WHERE LOWER(COALESCE(a.status, '')) = 'rejected'
+		ORDER BY a.updated_at DESC, a.id DESC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	recipients := make([]ApplicationNotificationRecipient, 0)
+	for rows.Next() {
+		var recipient ApplicationNotificationRecipient
+		if err := rows.Scan(
+			&recipient.ApplicationID,
+			&recipient.StudentID,
+			&recipient.Email,
+			&recipient.StudentNumber,
+			&recipient.DisplayName,
+			&recipient.Status,
+			&recipient.RejectedReason,
+		); err != nil {
+			return nil, err
+		}
+		recipients = append(recipients, recipient)
+	}
+	return recipients, rows.Err()
+}
+
 func InsertApplicationClosureNotifications(db *sql.DB, recipients []ApplicationNotificationRecipient) error {
 	if len(recipients) == 0 {
 		return nil
@@ -426,7 +475,80 @@ func InsertApplicationClosureNotifications(db *sql.DB, recipients []ApplicationN
 	for _, recipient := range recipients {
 		message := ApplicationClosureNotificationMessage(recipient)
 		if _, err := tx.Exec(
-			`INSERT INTO notifications (user_id, message, read, created_at) VALUES ($1, $2, FALSE, NOW())`,
+			`INSERT INTO notifications (user_id, message, read, created_at)
+			 SELECT $1, $2, FALSE, NOW()
+			 WHERE NOT EXISTS (
+			   SELECT 1
+			   FROM notifications
+			   WHERE user_id = $1
+			     AND message = $2
+			     AND created_at > NOW() - INTERVAL '1 hour'
+			 )`,
+			recipient.StudentID,
+			message,
+		); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
+func ListStudentNotificationRecipients(db *sql.DB) ([]StudentNotificationRecipient, error) {
+	rows, err := db.Query(`
+		SELECT
+			u.id,
+			u.email,
+			COALESCE(NULLIF(u.nu_id, ''), ''),
+			COALESCE(NULLIF(u.email, ''), 'Student')
+		FROM users u
+		JOIN roles r ON r.id = u.role_id
+		WHERE LOWER(r.name) = 'student'
+		ORDER BY u.id
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	recipients := make([]StudentNotificationRecipient, 0)
+	for rows.Next() {
+		var recipient StudentNotificationRecipient
+		if err := rows.Scan(
+			&recipient.StudentID,
+			&recipient.Email,
+			&recipient.StudentNumber,
+			&recipient.DisplayName,
+		); err != nil {
+			return nil, err
+		}
+		recipients = append(recipients, recipient)
+	}
+	return recipients, rows.Err()
+}
+
+func InsertApplicationOpeningNotifications(db *sql.DB, recipients []StudentNotificationRecipient, message string) error {
+	if len(recipients) == 0 {
+		return nil
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	for _, recipient := range recipients {
+		if _, err := tx.Exec(
+			`INSERT INTO notifications (user_id, message, read, created_at)
+			 SELECT $1, $2, FALSE, NOW()
+			 WHERE NOT EXISTS (
+			   SELECT 1
+			   FROM notifications
+			   WHERE user_id = $1
+			     AND message = $2
+			     AND created_at > NOW() - INTERVAL '1 hour'
+			 )`,
 			recipient.StudentID,
 			message,
 		); err != nil {
@@ -450,6 +572,8 @@ func ApplicationClosureNotificationMessage(recipient ApplicationNotificationReci
 			return "Your housing application was rejected."
 		}
 		return fmt.Sprintf("Your housing application was rejected. Reason: %s", reason)
+	case "pending":
+		return "Housing applications are now closed. Your application is still pending review, and housing staff will notify you after a decision is made."
 	default:
 		return fmt.Sprintf("Your housing application status is %s.", strings.TrimSpace(recipient.Status))
 	}
@@ -485,10 +609,10 @@ func listApprovedApplicantsForAllocation(db *sql.DB) ([]allocationApplicant, err
 
 func loadRoomOccupancy(db *sql.DB) (map[string]roomOccupancy, error) {
 	rows, err := db.Query(`
-		SELECT ra.block, ra.room_number, COUNT(*)::int, COALESCE(LOWER(MAX(a.gender)), '')
+		SELECT ra.block, ra.room_number, ra.bed_number, COALESCE(LOWER(a.gender), '')
 		FROM room_allocations ra
 		JOIN applications a ON a.id = ra.application_id
-		GROUP BY ra.block, ra.room_number
+		ORDER BY ra.block, ra.room_number, ra.bed_number
 	`)
 	if err != nil {
 		return nil, err
@@ -497,12 +621,22 @@ func loadRoomOccupancy(db *sql.DB) (map[string]roomOccupancy, error) {
 
 	occupancy := make(map[string]roomOccupancy)
 	for rows.Next() {
-		var block, roomNumber, count int
+		var block, roomNumber, bedNumber int
 		var gender string
-		if err := rows.Scan(&block, &roomNumber, &count, &gender); err != nil {
+		if err := rows.Scan(&block, &roomNumber, &bedNumber, &gender); err != nil {
 			return nil, err
 		}
-		occupancy[roomKey(block, roomNumber)] = roomOccupancy{Gender: gender, Count: count}
+		key := roomKey(block, roomNumber)
+		current := occupancy[key]
+		if current.Beds == nil {
+			current.Beds = map[int]bool{}
+		}
+		if current.Gender == "" {
+			current.Gender = gender
+		}
+		current.Beds[bedNumber] = true
+		current.Count = len(current.Beds)
+		occupancy[key] = current
 	}
 	return occupancy, rows.Err()
 }
@@ -568,12 +702,18 @@ func allocateGroup(applicants []allocationApplicant, rooms []roomSlot, occupancy
 		}
 		used[applicant.ApplicationID] = true
 
-		room, bedStart, err := findFirstAvailableRoom(group, rooms, occupancy)
+		room, beds, err := findFirstAvailableRoom(group, rooms, occupancy)
 		if err != nil {
 			return nil, err
 		}
 		key := roomKey(room.Block, room.RoomNumber)
 		current := occupancy[key]
+		if current.Beds == nil {
+			current.Beds = map[int]bool{}
+			for bedNumber := 1; bedNumber <= current.Count; bedNumber++ {
+				current.Beds[bedNumber] = true
+			}
+		}
 		if current.Gender == "" && len(group) > 0 {
 			current.Gender = normalizeAllocationGender(group[0].Gender)
 		}
@@ -584,10 +724,11 @@ func allocateGroup(applicants []allocationApplicant, rooms []roomSlot, occupancy
 				StudentID:     member.StudentID,
 				Block:         room.Block,
 				RoomNumber:    room.RoomNumber,
-				BedNumber:     bedStart + idx,
+				BedNumber:     beds[idx],
 			})
+			current.Beds[beds[idx]] = true
 		}
-		current.Count += len(group)
+		current.Count = len(current.Beds)
 		occupancy[key] = current
 	}
 
@@ -613,7 +754,7 @@ func findMutualPreferredRoommate(applicant allocationApplicant, byStudentID map[
 	return nil
 }
 
-func findFirstAvailableRoom(group []allocationApplicant, rooms []roomSlot, occupancy map[string]roomOccupancy) (roomSlot, int, error) {
+func findFirstAvailableRoom(group []allocationApplicant, rooms []roomSlot, occupancy map[string]roomOccupancy) (roomSlot, []int, error) {
 	groupGender := ""
 	if len(group) > 0 {
 		groupGender = normalizeAllocationGender(group[0].Gender)
@@ -625,16 +766,43 @@ func findFirstAvailableRoom(group []allocationApplicant, rooms []roomSlot, occup
 		if current.Gender != "" && current.Gender != groupGender {
 			continue
 		}
-		if current.Count+len(group) > room.Capacity {
+		beds := firstAvailableBeds(current, room.Capacity, len(group))
+		if len(beds) < len(group) {
 			continue
 		}
-		return room, current.Count + 1, nil
+		return room, beds, nil
 	}
 
 	if len(group) == 0 {
-		return roomSlot{}, 0, fmt.Errorf("no room available")
+		return roomSlot{}, nil, fmt.Errorf("no room available")
 	}
-	return roomSlot{}, 0, fmt.Errorf("no room available for %s applicants", groupGender)
+	return roomSlot{}, nil, fmt.Errorf("no room available for %s applicants", groupGender)
+}
+
+func firstAvailableBeds(current roomOccupancy, capacity int, needed int) []int {
+	if needed <= 0 {
+		return nil
+	}
+
+	occupied := current.Beds
+	if occupied == nil {
+		occupied = map[int]bool{}
+		for bedNumber := 1; bedNumber <= current.Count; bedNumber++ {
+			occupied[bedNumber] = true
+		}
+	}
+
+	beds := make([]int, 0, needed)
+	for bedNumber := 1; bedNumber <= capacity; bedNumber++ {
+		if occupied[bedNumber] {
+			continue
+		}
+		beds = append(beds, bedNumber)
+		if len(beds) == needed {
+			return beds
+		}
+	}
+	return beds
 }
 
 func buildRoomList(blocks []int, capacity int) []roomSlot {

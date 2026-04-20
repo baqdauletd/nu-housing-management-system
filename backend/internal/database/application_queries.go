@@ -81,11 +81,27 @@ func SubmitApplication(db *sql.DB, a models.Application) (int, error) {
 func UpdateStudentApplicationDetails(db *sql.DB, studentID int, a models.Application) (models.Application, error) {
 	query := `
 		UPDATE applications
-		SET room_preference = $1,
-		    additional_info = $2,
+		SET applicant_type = NULLIF($1, ''),
+		    name_surname = NULLIF($2, ''),
+		    fio = NULLIF($3, ''),
+		    birth_date = $4,
+		    iin = NULLIF($5, ''),
+		    school = NULLIF($6, ''),
+		    level = NULLIF($7, ''),
+		    passport_number = NULLIF($8, ''),
+		    comments = NULLIF($9, ''),
+		    year = $10,
+		    major = $11,
+		    gender = $12,
+		    room_preference = $13,
+		    additional_info = $14,
+		    status = 'pending',
+		    rejected_reason = NULL,
+		    reviewed_by = NULL,
+		    review_timestamp = NULL,
 		    updated_at = NOW()
-		WHERE id = $3
-		  AND student_id = $4
+		WHERE id = $15
+		  AND student_id = $16
 		RETURNING id, student_id, COALESCE(student_number, ''), COALESCE(name_surname, ''), COALESCE(fio, ''), birth_date,
 		          COALESCE(iin, ''), COALESCE(school, ''), COALESCE(level, ''), COALESCE(comments, ''),
 		          year, major, gender, COALESCE(room_preference, ''), COALESCE(additional_info, ''),
@@ -95,6 +111,18 @@ func UpdateStudentApplicationDetails(db *sql.DB, studentID int, a models.Applica
 	var updated models.Application
 	err := db.QueryRow(
 		query,
+		a.ApplicantType,
+		a.NameSurname,
+		a.FIO,
+		a.BirthDate,
+		a.IIN,
+		a.School,
+		a.Level,
+		a.PassportNumber,
+		a.Comments,
+		a.Year,
+		a.Major,
+		a.Gender,
 		a.RoomPreference,
 		a.AdditionalInfo,
 		a.ID,
@@ -272,6 +300,20 @@ func SetApplicationDecision(db *sql.DB, id int, status string, reason string) er
 		WHERE id = $3
 	`
 	_, err := db.Exec(query, status, reason, id)
+	return err
+}
+
+func MarkApplicationAutomatedReviewQueued(db *sql.DB, id int) error {
+	query := `
+		UPDATE applications
+		SET status = 'pending',
+		    rejected_reason = 'Automated review is running again because application fields were edited.',
+		    reviewed_by = NULL,
+		    review_timestamp = NOW(),
+		    updated_at = NOW()
+		WHERE id = $1
+	`
+	_, err := db.Exec(query, id)
 	return err
 }
 

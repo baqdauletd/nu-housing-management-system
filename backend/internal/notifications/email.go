@@ -2,12 +2,20 @@ package notifications
 
 import (
 	"bytes"
+	"crypto/tls"
+	"errors"
 	"fmt"
+	"net"
 	"net/smtp"
 	"strings"
+	"time"
 
 	"nu-housing-management-system/backend/internal/config"
 )
+
+var ErrEmailRecipientNotAllowed = errors.New("email recipient is not allowed")
+
+const sendTimeout = 10 * time.Second
 
 type EmailMessage struct {
 	To      string
@@ -29,8 +37,7 @@ func (s EmailSender) Configured() bool {
 	}
 	return strings.TrimSpace(s.cfg.SMTPHost) != "" &&
 		s.cfg.SMTPPort > 0 &&
-		strings.TrimSpace(s.cfg.SMTPFrom) != "" &&
-		len(s.cfg.SMTPAllowedRecipients) > 0
+		strings.TrimSpace(s.cfg.SMTPFrom) != ""
 }
 
 func (s EmailSender) Send(message EmailMessage) error {
@@ -44,7 +51,7 @@ func (s EmailSender) Send(message EmailMessage) error {
 		return nil
 	}
 	if !s.cfg.IsEmailRecipientAllowed(to) {
-		return nil
+		return fmt.Errorf("%w: %s", ErrEmailRecipientNotAllowed, to)
 	}
 
 	var auth smtp.Auth
@@ -64,8 +71,52 @@ func (s EmailSender) Send(message EmailMessage) error {
 	payload.WriteString(message.Body)
 	payload.WriteString("\r\n")
 
-	address := fmt.Sprintf("%s:%d", strings.TrimSpace(s.cfg.SMTPHost), s.cfg.SMTPPort)
-	return smtp.SendMail(address, auth, from, []string{to}, payload.Bytes())
+	host := strings.TrimSpace(s.cfg.SMTPHost)
+	address := fmt.Sprintf("%s:%d", host, s.cfg.SMTPPort)
+	dialer := net.Dialer{Timeout: sendTimeout}
+	conn, err := dialer.Dial("tcp", address)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	if err := conn.SetDeadline(time.Now().Add(sendTimeout)); err != nil {
+		return err
+	}
+
+	client, err := smtp.NewClient(conn, host)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+
+	if ok, _ := client.Extension("STARTTLS"); ok {
+		if err := client.StartTLS(&tls.Config{ServerName: host, MinVersion: tls.VersionTLS12}); err != nil {
+			return err
+		}
+	}
+	if auth != nil {
+		if err := client.Auth(auth); err != nil {
+			return err
+		}
+	}
+	if err := client.Mail(from); err != nil {
+		return err
+	}
+	if err := client.Rcpt(to); err != nil {
+		return err
+	}
+	writer, err := client.Data()
+	if err != nil {
+		return err
+	}
+	if _, err := writer.Write(payload.Bytes()); err != nil {
+		writer.Close()
+		return err
+	}
+	if err := writer.Close(); err != nil {
+		return err
+	}
+	return client.Quit()
 }
 
 func sanitizeHeader(value string) string {

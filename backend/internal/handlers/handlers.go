@@ -5,8 +5,10 @@ import (
 	"context"
 	"crypto/rand"
 	"database/sql"
+	"errors"
 	"fmt"
 	"io"
+	"log"
 	"math/big"
 	"net/http"
 	"net/url"
@@ -353,7 +355,7 @@ func GetMyApplications(db *sql.DB) gin.HandlerFunc {
 	}
 }
 
-func UpdateMyApplication(db *sql.DB) gin.HandlerFunc {
+func UpdateMyApplication(db *sql.DB, minioStore *database.MinIOStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id, err := strconv.Atoi(c.Param("id"))
 		if err != nil {
@@ -362,6 +364,20 @@ func UpdateMyApplication(db *sql.DB) gin.HandlerFunc {
 		}
 
 		var body struct {
+			ApplicantType       *string `json:"applicant_type"`
+			NameSurname         *string `json:"name_surname"`
+			FIO                 *string `json:"fio"`
+			BirthDate           *string `json:"birth_date"`
+			IIN                 *string `json:"iin"`
+			School              *string `json:"school"`
+			Level               *string `json:"level"`
+			PassportNumber      *string `json:"passport_number"`
+			Comments            *string `json:"comments"`
+			Year                *int    `json:"year"`
+			Major               *string `json:"major"`
+			Gender              *string `json:"gender"`
+			RoomPreference      *string `json:"room_preference"`
+			AdditionalInfo      *string `json:"additional_info"`
 			ApartmentInAstana   *bool   `json:"apartment_in_astana"`
 			ParentsWorkInAstana *bool   `json:"parents_work_in_astana"`
 			AstanaResident      *bool   `json:"astana_resident"`
@@ -389,13 +405,83 @@ func UpdateMyApplication(db *sql.DB) gin.HandlerFunc {
 			return
 		}
 
-		app.AdditionalInfo = mergeEditableApplicationDetails(
-			app.AdditionalInfo,
-			body.ApartmentInAstana,
-			body.ParentsWorkInAstana,
-			body.AstanaResident,
-			body.PreferredRoommate,
-		)
+		settings, err := database.GetSystemSettings(db)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load application settings", "details": err.Error()})
+			return
+		}
+		if !database.IsApplicationsOpen(settings, time.Now()) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "applications are currently closed"})
+			return
+		}
+
+		parseBirthDate := func(raw string) (*time.Time, bool) {
+			raw = strings.TrimSpace(raw)
+			if raw == "" {
+				return nil, true
+			}
+			parsed, err := time.Parse("2006-01-02", raw)
+			if err != nil {
+				return nil, false
+			}
+			return &parsed, true
+		}
+
+		if body.ApplicantType != nil {
+			app.ApplicantType = database.NormalizeApplicantTypeForSubmission(*body.ApplicantType, app.AdditionalInfo)
+		}
+		if body.NameSurname != nil {
+			app.NameSurname = strings.TrimSpace(*body.NameSurname)
+		}
+		if body.FIO != nil {
+			app.FIO = strings.TrimSpace(*body.FIO)
+		}
+		if body.BirthDate != nil {
+			birthDate, ok := parseBirthDate(*body.BirthDate)
+			if !ok {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid birth_date", "details": "expected YYYY-MM-DD"})
+				return
+			}
+			app.BirthDate = birthDate
+		}
+		if body.IIN != nil {
+			app.IIN = strings.TrimSpace(*body.IIN)
+		}
+		if body.School != nil {
+			app.School = strings.TrimSpace(*body.School)
+		}
+		if body.Level != nil {
+			app.Level = strings.TrimSpace(*body.Level)
+		}
+		if body.PassportNumber != nil {
+			app.PassportNumber = strings.TrimSpace(*body.PassportNumber)
+		}
+		if body.Comments != nil {
+			app.Comments = strings.TrimSpace(*body.Comments)
+		}
+		if body.Year != nil {
+			app.Year = *body.Year
+		}
+		if body.Major != nil {
+			app.Major = strings.TrimSpace(*body.Major)
+		}
+		if body.Gender != nil {
+			app.Gender = strings.TrimSpace(*body.Gender)
+		}
+		if body.RoomPreference != nil {
+			app.RoomPreference = strings.TrimSpace(*body.RoomPreference)
+		}
+		if body.AdditionalInfo != nil {
+			app.AdditionalInfo = *body.AdditionalInfo
+		} else {
+			app.AdditionalInfo = mergeEditableApplicationDetails(
+				app.AdditionalInfo,
+				body.ApartmentInAstana,
+				body.ParentsWorkInAstana,
+				body.AstanaResident,
+				body.PreferredRoommate,
+			)
+		}
 
 		updated, err := database.UpdateStudentApplicationDetails(db, studentID, app)
 		if err != nil {
@@ -407,11 +493,22 @@ func UpdateMyApplication(db *sql.DB) gin.HandlerFunc {
 			return
 		}
 
-		payload, err := buildApplicationReviewPayload(db, updated)
+		if err := database.MarkApplicationAutomatedReviewQueued(db, updated.ID); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to queue automated review", "details": err.Error()})
+			return
+		}
+		queuedApplication, err := database.GetApplicationByID(db, updated.ID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to reload application", "details": err.Error()})
+			return
+		}
+
+		payload, err := buildApplicationReviewPayload(db, queuedApplication)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch application review details", "details": err.Error()})
 			return
 		}
+		go processApplicationDocumentsAsync(db, minioStore, updated.ID)
 		c.JSON(http.StatusOK, payload)
 	}
 }
@@ -484,7 +581,8 @@ func UpdateSystemSettings(db *sql.DB, cfg *config.Config) gin.HandlerFunc {
 			return
 		}
 		wasApplicationsEnabled := settings.ApplicationsEnabled
-		var emailResult *applicationEmailResult
+		applicationClosureQueued := false
+		applicationOpeningQueued := false
 
 		if body.ApplicationsEnabled != nil {
 			settings.ApplicationsEnabled = *body.ApplicationsEnabled
@@ -526,31 +624,12 @@ func UpdateSystemSettings(db *sql.DB, cfg *config.Config) gin.HandlerFunc {
 			return
 		}
 		if wasApplicationsEnabled && !settings.ApplicationsEnabled {
-			if err := database.RunRoomAllocation(db); err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "applications were closed but room allocation failed", "details": err.Error()})
-				return
-			}
-			recipients, err := database.ListApplicationNotificationRecipients(db)
-			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "applications were closed but notification recipients could not be loaded", "details": err.Error()})
-				return
-			}
-			if err := database.InsertApplicationClosureNotifications(db, recipients); err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "applications were closed but notifications could not be created", "details": err.Error()})
-				return
-			}
-			result := sendApplicationClosureEmails(cfg, recipients)
-			if result.Failed > 0 {
-				c.JSON(http.StatusInternalServerError, gin.H{
-					"error":                       "applications were closed but some email notifications failed",
-					"email_notifications_sent":    result.Sent,
-					"email_notifications_failed":  result.Failed,
-					"email_notifications_skipped": result.Skipped,
-					"details":                     result.Errors,
-				})
-				return
-			}
-			emailResult = &result
+			applicationClosureQueued = true
+			go processApplicationClosureAsync(db, cfg)
+		}
+		if !wasApplicationsEnabled && settings.ApplicationsEnabled {
+			applicationOpeningQueued = true
+			go processApplicationOpeningAsync(db, cfg, settings.ApplicationClose)
 		}
 
 		if userID, _, ok := requestIdentity(c); ok {
@@ -558,10 +637,14 @@ func UpdateSystemSettings(db *sql.DB, cfg *config.Config) gin.HandlerFunc {
 		}
 
 		response := buildSystemSettingsResponse(settings)
-		if emailResult != nil {
-			response["email_notifications_sent"] = emailResult.Sent
-			response["email_notifications_failed"] = emailResult.Failed
-			response["email_notifications_skipped"] = emailResult.Skipped
+		if applicationClosureQueued {
+			response["room_allocation_queued"] = true
+			response["application_closure_notifications_queued"] = true
+			response["email_notifications_queued"] = notifications.NewEmailSender(cfg).Configured()
+		}
+		if applicationOpeningQueued {
+			response["application_opening_notifications_queued"] = true
+			response["email_notifications_queued"] = notifications.NewEmailSender(cfg).Configured()
 		}
 		c.JSON(http.StatusOK, response)
 	}
@@ -658,6 +741,107 @@ func processUploadedDocumentAsync(db *sql.DB, applicationID, documentID int, doc
 	if err := analyzeAndApplyDecision(ctx, db, applicationID, documentID, docType, pdfBytes); err != nil {
 		fmt.Printf("background document analysis failed for application %d document %d: %v\n", applicationID, documentID, err)
 	}
+}
+
+func processApplicationDocumentsAsync(db *sql.DB, minioStore *database.MinIOStore, applicationID int) {
+	if minioStore == nil || minioStore.Client == nil {
+		log.Printf("application recheck skipped for application %d: storage is not configured", applicationID)
+		return
+	}
+
+	log.Printf("application recheck started for application %d", applicationID)
+	defer log.Printf("application recheck finished for application %d", applicationID)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+
+	documents, err := database.GetDocumentsByApplication(db, applicationID)
+	if err != nil {
+		log.Printf("application recheck failed to load documents for application %d: %v", applicationID, err)
+		return
+	}
+	if len(documents) == 0 {
+		if err := database.ApplyAutomatedDecision(db, applicationID); err != nil {
+			log.Printf("application recheck failed to apply missing-document decision for application %d: %v", applicationID, err)
+		}
+		return
+	}
+
+	for _, document := range documents {
+		object, err := minioStore.Client.GetObject(ctx, minioStore.Bucket, document.FileURL, minio.GetObjectOptions{})
+		if err != nil {
+			log.Printf("application recheck failed to open document %d for application %d: %v", document.ID, applicationID, err)
+			continue
+		}
+		pdfBytes, err := io.ReadAll(object)
+		closeErr := object.Close()
+		if err != nil {
+			log.Printf("application recheck failed to read document %d for application %d: %v", document.ID, applicationID, err)
+			continue
+		}
+		if closeErr != nil {
+			log.Printf("application recheck failed to close document %d for application %d: %v", document.ID, applicationID, closeErr)
+		}
+		if err := analyzeAndApplyDecision(ctx, db, applicationID, document.ID, document.Type, pdfBytes); err != nil {
+			log.Printf("application recheck failed for application %d document %d: %v", applicationID, document.ID, err)
+		}
+	}
+}
+
+func processApplicationClosureAsync(db *sql.DB, cfg *config.Config) {
+	log.Printf("application closure processing started")
+	defer log.Printf("application closure processing finished")
+
+	if err := database.RunRoomAllocation(db); err != nil {
+		log.Printf("application closure room allocation failed: %v", err)
+		return
+	}
+
+	recipients, err := database.ListApplicationNotificationRecipients(db)
+	if err != nil {
+		log.Printf("application closure notification recipients could not be loaded: %v", err)
+		return
+	}
+
+	if err := database.InsertApplicationClosureNotifications(db, recipients); err != nil {
+		log.Printf("application closure in-app notifications could not be created: %v", err)
+		return
+	}
+
+	result := sendApplicationClosureEmails(cfg, recipients)
+	log.Printf(
+		"application closure emails completed with sent=%d failed=%d skipped=%d errors=%v",
+		result.Sent,
+		result.Failed,
+		result.Skipped,
+		result.Errors,
+	)
+}
+
+func processApplicationOpeningAsync(db *sql.DB, cfg *config.Config, deadline *time.Time) {
+	log.Printf("application opening notification processing started")
+	defer log.Printf("application opening notification processing finished")
+
+	recipients, err := database.ListStudentNotificationRecipients(db)
+	if err != nil {
+		log.Printf("application opening notification recipients could not be loaded: %v", err)
+		return
+	}
+
+	message := ApplicationOpeningNotificationMessage(deadline)
+	if err := database.InsertApplicationOpeningNotifications(db, recipients, message); err != nil {
+		log.Printf("application opening in-app notifications could not be created: %v", err)
+		return
+	}
+
+	result := sendApplicationOpeningEmails(cfg, recipients, deadline)
+	log.Printf(
+		"application opening emails completed with sent=%d failed=%d skipped=%d errors=%v",
+		result.Sent,
+		result.Failed,
+		result.Skipped,
+		result.Errors,
+	)
 }
 
 func analyzeAndApplyDecision(ctx context.Context, db *sql.DB, applicationID, documentID int, docType string, pdfBytes []byte) error {
@@ -915,7 +1099,7 @@ func HousingDormInventory(db *sql.DB) gin.HandlerFunc {
 	}
 }
 
-func HousingApprove(db *sql.DB, cfg *config.Config) gin.HandlerFunc {
+func HousingApprove(db *sql.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		idStr := c.Param("id")
 		id, _ := strconv.Atoi(idStr)
@@ -931,32 +1115,7 @@ func HousingApprove(db *sql.DB, cfg *config.Config) gin.HandlerFunc {
 			return
 		}
 
-		emailSent := false
-		emailSkipped := false
-		if cfg != nil {
-			recipient, err := database.GetApplicationNotificationRecipient(db, id)
-			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "application approved but notification recipient could not be loaded", "details": err.Error()})
-				return
-			}
-
-			sender := notifications.NewEmailSender(cfg)
-			if !sender.Configured() {
-				emailSkipped = true
-			} else {
-				message := buildApprovedApplicationPaymentEmail(cfg, recipient)
-				if strings.TrimSpace(message.To) == "" {
-					emailSkipped = true
-				} else if err := sender.Send(message); err != nil {
-					c.JSON(http.StatusInternalServerError, gin.H{"error": "application approved but approval email could not be sent", "details": err.Error()})
-					return
-				} else {
-					emailSent = true
-				}
-			}
-		}
-
-		c.JSON(http.StatusOK, gin.H{"status": "approved", "email_sent": emailSent, "email_skipped": emailSkipped})
+		c.JSON(http.StatusOK, gin.H{"status": "approved"})
 	}
 }
 
@@ -983,6 +1142,50 @@ func HousingReject(db *sql.DB) gin.HandlerFunc {
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"status": "rejected"})
+	}
+}
+
+func HousingNotifyRejected(db *sql.DB, cfg *config.Config) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		settings, err := database.GetSystemSettings(db)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load system settings", "details": err.Error()})
+			return
+		}
+		if !database.IsApplicationsOpen(settings, time.Now()) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "applications must be open to notify rejected students for edits"})
+			return
+		}
+
+		recipients, err := database.ListRejectedApplicationEditRecipients(db)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load rejected applications", "details": err.Error()})
+			return
+		}
+		if len(recipients) == 0 {
+			c.JSON(http.StatusNotFound, gin.H{"error": "no rejected applications found"})
+			return
+		}
+
+		sender := notifications.NewEmailSender(cfg)
+		if !sender.Configured() {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "email notifications are not configured"})
+			return
+		}
+
+		result := sendRejectedApplicationEditEmails(cfg, recipients, settings.ApplicationClose)
+		status := http.StatusOK
+		if result.Sent == 0 && result.Failed > 0 {
+			status = http.StatusInternalServerError
+		} else if result.Failed > 0 || result.Skipped > 0 {
+			status = http.StatusMultiStatus
+		}
+		c.JSON(status, gin.H{
+			"sent":    result.Sent,
+			"failed":  result.Failed,
+			"skipped": result.Skipped,
+			"errors":  result.Errors,
+		})
 	}
 }
 
@@ -1702,6 +1905,81 @@ func sendApplicationClosureEmails(cfg *config.Config, recipients []database.Appl
 			continue
 		}
 		if err := sender.Send(message); err != nil {
+			if errors.Is(err, notifications.ErrEmailRecipientNotAllowed) {
+				result.Skipped++
+				if len(result.Errors) < 10 {
+					result.Errors = append(result.Errors, err.Error())
+				}
+				continue
+			}
+			result.Failed++
+			if len(result.Errors) < 10 {
+				result.Errors = append(result.Errors, fmt.Sprintf("%s: %v", message.To, err))
+			}
+			continue
+		}
+		result.Sent++
+	}
+
+	return result
+}
+
+func sendRejectedApplicationEditEmails(cfg *config.Config, recipients []database.ApplicationNotificationRecipient, deadline *time.Time) applicationEmailResult {
+	result := applicationEmailResult{}
+	sender := notifications.NewEmailSender(cfg)
+	if !sender.Configured() {
+		result.Skipped = len(recipients)
+		return result
+	}
+
+	for _, recipient := range recipients {
+		message := buildRejectedApplicationEditEmail(cfg, recipient, deadline)
+		if strings.TrimSpace(message.To) == "" {
+			result.Skipped++
+			continue
+		}
+		if err := sender.Send(message); err != nil {
+			if errors.Is(err, notifications.ErrEmailRecipientNotAllowed) {
+				result.Skipped++
+				if len(result.Errors) < 10 {
+					result.Errors = append(result.Errors, err.Error())
+				}
+				continue
+			}
+			result.Failed++
+			if len(result.Errors) < 10 {
+				result.Errors = append(result.Errors, fmt.Sprintf("%s: %v", message.To, err))
+			}
+			continue
+		}
+		result.Sent++
+	}
+
+	return result
+}
+
+func sendApplicationOpeningEmails(cfg *config.Config, recipients []database.StudentNotificationRecipient, deadline *time.Time) applicationEmailResult {
+	result := applicationEmailResult{}
+	sender := notifications.NewEmailSender(cfg)
+	if !sender.Configured() {
+		result.Skipped = len(recipients)
+		return result
+	}
+
+	for _, recipient := range recipients {
+		message := buildApplicationOpeningEmail(cfg, recipient, deadline)
+		if strings.TrimSpace(message.To) == "" {
+			result.Skipped++
+			continue
+		}
+		if err := sender.Send(message); err != nil {
+			if errors.Is(err, notifications.ErrEmailRecipientNotAllowed) {
+				result.Skipped++
+				if len(result.Errors) < 10 {
+					result.Errors = append(result.Errors, err.Error())
+				}
+				continue
+			}
 			result.Failed++
 			if len(result.Errors) < 10 {
 				result.Errors = append(result.Errors, fmt.Sprintf("%s: %v", message.To, err))
@@ -1730,28 +2008,72 @@ func buildApplicationClosureEmail(recipient database.ApplicationNotificationReci
 	}
 }
 
-func buildApprovedApplicationPaymentEmail(cfg *config.Config, recipient database.ApplicationNotificationRecipient) notifications.EmailMessage {
+func ApplicationOpeningNotificationMessage(deadline *time.Time) string {
+	deadlineText := "The deadline has not been set yet."
+	if deadline != nil {
+		deadlineText = fmt.Sprintf("The deadline is %s.", deadline.UTC().Format("January 2, 2006"))
+	}
+	return fmt.Sprintf("The housing application process is now open. %s", deadlineText)
+}
+
+func buildApplicationOpeningEmail(cfg *config.Config, recipient database.StudentNotificationRecipient, deadline *time.Time) notifications.EmailMessage {
 	name := strings.TrimSpace(recipient.DisplayName)
 	if name == "" {
 		name = "Student"
 	}
 
-	paymentURL := fmt.Sprintf(
-		"%s/dashboard/student/payment?applicationId=%d",
-		strings.TrimRight(cfg.FrontendBaseURL, "/"),
-		recipient.ApplicationID,
-	)
+	portalURL := "/dashboard/student"
+	if cfg != nil && strings.TrimSpace(cfg.FrontendBaseURL) != "" {
+		portalURL = strings.TrimRight(cfg.FrontendBaseURL, "/") + portalURL
+	}
 
 	body := fmt.Sprintf(
-		"Dear %s,\n\nYour housing application has been approved.\n\nTo confirm your place, please complete the housing payment using the link below:\n%s\n\nIf the payment page does not open directly, sign in to the NU Housing portal and open the Payment section for application #%d.\n\nRegards,\nNU Housing",
+		"Dear %s,\n\n%s\n\nOpen the student dashboard to submit or edit your housing application:\n%s\n\nRegards,\nNU Housing",
 		name,
-		paymentURL,
-		recipient.ApplicationID,
+		ApplicationOpeningNotificationMessage(deadline),
+		portalURL,
 	)
 
 	return notifications.EmailMessage{
 		To:      strings.TrimSpace(recipient.Email),
-		Subject: "NU Housing application approved: payment required",
+		Subject: "NU Housing applications are now open",
+		Body:    body,
+	}
+}
+
+func buildRejectedApplicationEditEmail(cfg *config.Config, recipient database.ApplicationNotificationRecipient, deadline *time.Time) notifications.EmailMessage {
+	name := strings.TrimSpace(recipient.DisplayName)
+	if name == "" {
+		name = "Student"
+	}
+
+	deadlineText := "before the application deadline"
+	if deadline != nil {
+		deadlineText = fmt.Sprintf("by %s", deadline.UTC().Format("January 2, 2006"))
+	}
+
+	portalURL := "/dashboard/student"
+	if cfg != nil && strings.TrimSpace(cfg.FrontendBaseURL) != "" {
+		portalURL = strings.TrimRight(cfg.FrontendBaseURL, "/") + portalURL
+	}
+
+	reason := strings.TrimSpace(recipient.RejectedReason)
+	reasonText := ""
+	if reason != "" {
+		reasonText = fmt.Sprintf("\n\nReason for rejection: %s", reason)
+	}
+
+	body := fmt.Sprintf(
+		"Dear %s,\n\nYour housing application was rejected, but applications are still open and you have a chance to edit and resubmit your application %s.%s\n\nOpen the student dashboard to update your application:\n%s\n\nRegards,\nNU Housing",
+		name,
+		deadlineText,
+		reasonText,
+		portalURL,
+	)
+
+	return notifications.EmailMessage{
+		To:      strings.TrimSpace(recipient.Email),
+		Subject: "NU Housing application: please edit and resubmit",
 		Body:    body,
 	}
 }
