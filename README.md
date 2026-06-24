@@ -2,6 +2,8 @@
 
 Backend service for housing applications and document storage.
 
+Fronted service is the following repo - [text](https://github.com/ajtmaganbetova/nu-housing-management-system-client)
+
 ## Running
 
 `docker compose up --build` starts:
@@ -42,6 +44,7 @@ Usually kept as-is for local Docker:
 - `MINIO_USE_SSL`
 - `FRONTEND_ORIGINS`
 - `GOOGLE_ALLOWED_DOMAIN`
+  comma-separated list supported, for example `nu.edu.kz,alumni.nu.edu.kz`
 
 Optional unless your auth flow needs it:
 - `GOOGLE_CLIENT_ID`
