@@ -2,7 +2,7 @@
 
 Backend service for housing applications and document storage.
 
-Fronted service is the following repo - [text](https://github.com/ajtmaganbetova/nu-housing-management-system-client)
+Fronted service is the following repo - [Frontend](https://github.com/ajtmaganbetova/nu-housing-management-system-client)
 
 ## Running
 
